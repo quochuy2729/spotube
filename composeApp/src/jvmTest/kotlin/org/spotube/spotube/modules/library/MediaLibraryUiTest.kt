@@ -43,6 +43,7 @@ import org.spotube.spotube.modules.library.local_tracks.LocalTracksBreadcrumb
 import org.spotube.spotube.modules.library.local_tracks.localTracksUiState
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaFolder
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaTrack
+import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaTrackComparator
 import org.spotube.spotube.modules.settings.Theme
 import org.spotube.spotube.modules.settings.UserSettings
 import java.io.File
@@ -123,6 +124,20 @@ class MediaLibraryUiTest {
                 ), ""
             ).canPlayFolder
         )
+    }
+
+    @Test
+    fun localTracksSortByDiscAndTrackWithUntaggedLast() {
+        fun track(name: String, disc: Int?, number: Int?) =
+            LocalMediaTrack("/m/$name", name, emptyList(), 0L, trackNumber = number, discNumber = disc)
+        val sorted = listOf(
+            track("untagged", null, null),
+            track("d2t1", 2, 1),
+            track("noDisc2", null, 2),
+            track("d1t1", 1, 1),
+            track("alpha", null, null)
+        ).sortedWith(LocalMediaTrackComparator)
+        assertEquals(listOf("d1t1", "noDisc2", "d2t1", "alpha", "untagged"), sorted.map { it.name })
     }
 
     @Test
@@ -340,6 +355,63 @@ class MediaLibraryUiTest {
                 scene.render(350_000_000).close()
                 assertEquals(1, clicks)
             }
+        }
+    }
+
+    @Test
+    fun longPressToReorderDoesNotAlsoPlayTheTrack() {
+        var plays = 0
+        var dragStarts = 0
+        var dragStops = 0
+        val state = localTracksUiState(
+            LibraryLocalTracksState(folders = folders, currentFolderPath = "/music"), ""
+        ).copy(isPlayOrder = true)
+        ImageComposeScene(360, 660) {
+            SpotubeTheme(UserSettings(theme = Theme.DARK)) {
+                LocalTracksContent(
+                    state, {}, { plays++ }, {}, {}, {},
+                    onMoveTrack = { _, _ -> },
+                    onDragStart = { dragStarts++ },
+                    onDragStop = { dragStops++ }
+                )
+            }
+        }.use { scene ->
+            repeat(6) { scene.render().close() }
+            val tile = allNodes(scene).first {
+                it.config.getOrNull(SemanticsActions.OnClick) != null &&
+                        it.config.getOrNull(SemanticsProperties.Text)
+                            ?.any { t -> t.text == tracks[0].name } == true
+            }
+            // Press on the left part of the tile (artwork), away from the trailing buttons.
+            val point = Offset(tile.boundsInRoot.left + 20f, tile.boundsInRoot.center.y)
+            scene.sendPointerEvent(
+                PointerEventType.Press, point, timeMillis = 0,
+                buttons = PointerButtons(isPrimaryPressed = true), button = PointerButton.Primary
+            )
+            // Hold well past the long-press timeout without moving.
+            repeat(20) {
+                Thread.sleep(50)
+                scene.render((it + 1) * 50_000_000L).close()
+            }
+            scene.sendPointerEvent(
+                PointerEventType.Release, point, timeMillis = 1_000,
+                buttons = PointerButtons(), button = PointerButton.Primary
+            )
+            repeat(4) { scene.render(1_100_000_000L + it * 16_000_000L).close() }
+            assertEquals(1, dragStarts, "long press should start a drag")
+            assertEquals(1, dragStops)
+            assertEquals(0, plays, "releasing a long press must not also play the track")
+            // A normal tap afterwards still plays.
+            scene.sendPointerEvent(
+                PointerEventType.Press, point, timeMillis = 2_000,
+                buttons = PointerButtons(isPrimaryPressed = true), button = PointerButton.Primary
+            )
+            scene.sendPointerEvent(
+                PointerEventType.Release, point, timeMillis = 2_050,
+                buttons = PointerButtons(), button = PointerButton.Primary
+            )
+            scene.render(2_100_000_000L).close()
+            assertEquals(1, plays)
         }
     }
 

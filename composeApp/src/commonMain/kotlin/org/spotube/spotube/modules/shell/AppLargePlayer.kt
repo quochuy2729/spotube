@@ -20,6 +20,7 @@ package org.spotube.spotube.modules.shell
 
 import org.spotube.millennium.composables.MillenniumDropdownMenuItem
 import org.spotube.spotube.resources.iconsax.IconsaxCd
+import org.spotube.spotube.resources.iconsax.IconsaxEdit
 import org.spotube.spotube.resources.iconsax.IconsaxMoon
 import org.spotube.spotube.resources.iconsax.IconsaxInformation
 import androidx.compose.foundation.background
@@ -105,6 +106,11 @@ import org.spotube.millennium.composables.MillenniumSlider
 import spotube.composeapp.generated.resources.Res
 import spotube.composeapp.generated.resources.player_go_to_album
 import spotube.composeapp.generated.resources.player_sleep_timer
+import spotube.composeapp.generated.resources.player_speed_value
+import spotube.composeapp.generated.resources.player_speed
+import spotube.composeapp.generated.resources.player_trim
+import spotube.composeapp.generated.resources.player_sleep_timer_tile_remaining
+import spotube.composeapp.generated.resources.player_sleep_timer_tile_track_end
 import spotube.composeapp.generated.resources.player_track_details
 import kotlin.time.Duration.Companion.milliseconds
 import spotube.composeapp.generated.resources.player_alternative_source_content_description
@@ -146,6 +152,7 @@ fun AppLargePlayer(
     audioPlayerQueue: AudioPlayerQueue = koinInject(),
     downloadsViewModel: DownloadsViewModel = koinViewModel(),
     playerOptionsViewModel: PlayerOptionsViewModel = koinViewModel(),
+    trimViewModel: TrackTrimViewModel = koinViewModel(),
     savedTracksViewModel: SavedTracksViewModel = koinViewModel<SavedTracksViewModel>(
         key = SAVED_TRACKS_COLLECTION_ID,
         parameters = { parametersOf() }
@@ -433,7 +440,18 @@ fun AppLargePlayer(
                             MillenniumIcon(Iconsax.IconsaxMusic, contentDescription = stringResource(Res.string.player_lyrics))
                         }
                         val goToAlbumLabel = stringResource(Res.string.player_go_to_album)
-                        val sleepTimerLabel = stringResource(Res.string.player_sleep_timer)
+                        val sleepTimerLabel = playerOptionsUiState.sleepTimerRemainingMs?.let {
+                            stringResource(Res.string.player_sleep_timer_tile_remaining, formatRemainingTime(it))
+                        } ?: if (playerOptionsUiState.sleepTimerUntilTrackEnd) {
+                            stringResource(Res.string.player_sleep_timer_tile_track_end)
+                        } else {
+                            stringResource(Res.string.player_sleep_timer)
+                        }
+                        val speedLabel = stringResource(
+                            Res.string.player_speed_value,
+                            formatSpeed(playerOptionsUiState.playbackSpeed)) + " · " +
+                            stringResource(Res.string.player_speed)
+                        val trimLabel = stringResource(Res.string.player_trim)
                         val trackDetailsLabel = stringResource(Res.string.player_track_details)
                         MillenniumDropdownMenu(
                             expanded = playerOptionsUiState.isMoreOptionsMenuOpen,
@@ -470,6 +488,20 @@ fun AppLargePlayer(
                                 onClick = {
                                     playerOptionsViewModel.dismissMoreOptionsMenu()
                                     playerOptionsViewModel.showSleepTimerDialog()
+                                })
+                            MillenniumDropdownMenuItem(
+                                label = speedLabel,
+                                icon = Iconsax.IconsaxNext,
+                                onClick = {
+                                    playerOptionsViewModel.dismissMoreOptionsMenu()
+                                    playerOptionsViewModel.showSpeedDialog()
+                                })
+                            MillenniumDropdownMenuItem(
+                                label = trimLabel,
+                                icon = Iconsax.IconsaxEdit,
+                                onClick = {
+                                    playerOptionsViewModel.dismissMoreOptionsMenu()
+                                    trimViewModel.open()
                                 })
                             MillenniumDropdownMenuItem(
                                 label = trackDetailsLabel,

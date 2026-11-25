@@ -30,6 +30,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
@@ -61,6 +64,15 @@ class ScrobbleManager(
     private var listenedMs: Long = 0L
     private var lastPositionMs: Long? = null
     private var scrobbled = false
+    private var listenEmitted = false
+
+    private val _listens = MutableSharedFlow<QueueEntry>(extraBufferCapacity = 16)
+
+    /**
+     * Emits once per "listened enough" play (same rule as scrobbling), whether or not a scrobble
+     * plugin is selected. Used for local play statistics.
+     */
+    val listens: SharedFlow<QueueEntry> = _listens.asSharedFlow()
 
     init {
         scope.launch {
@@ -119,11 +131,17 @@ class ScrobbleManager(
         if (deltaMs > MAX_COUNTED_POSITION_DELTA_MS) return
 
         listenedMs += deltaMs
-        if (scrobbled) return
+        if (scrobbled && listenEmitted) return
 
         val durationMs = entry.durationMs().takeIf { it > 0 } ?: snapshot.playerDurationMs
         val thresholdMs = scrobbleThresholdMs(durationMs) ?: return
         if (listenedMs < thresholdMs) return
+
+        if (!listenEmitted) {
+            listenEmitted = true
+            _listens.tryEmit(entry)
+        }
+        if (scrobbled) return
 
         if (scrobblePluginSource.selectedScrobblePlugin.value == null) {
             // No scrobble plugin selected yet: keep the session hot so it can be
@@ -160,6 +178,7 @@ class ScrobbleManager(
         playbackStartedAtEpochSeconds = null
         lastPositionMs = positionMs
         scrobbled = false
+        listenEmitted = false
     }
 
     private fun clearSession() {
@@ -168,6 +187,7 @@ class ScrobbleManager(
         playbackStartedAtEpochSeconds = null
         lastPositionMs = null
         scrobbled = false
+        listenEmitted = false
     }
 
     private fun nowEpochSeconds(): Long = Clock.System.now().epochSeconds

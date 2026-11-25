@@ -18,10 +18,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,7 +48,19 @@ import org.spotube.spotube.resources.iconsax.IconsaxFolderAdd
 import org.spotube.spotube.modules.shell.LocalAppShellBottomInset
 import org.spotube.spotube.resources.iconsax.Iconsax
 import org.spotube.spotube.resources.iconsax.IconsaxFolderOpen
+import org.spotube.spotube.resources.iconsax.IconsaxHeart2
+import org.spotube.spotube.resources.iconsax.IconsaxMusicPlaylist
+import org.spotube.spotube.resources.iconsax.InconsaxClock
+import org.spotube.spotube.modules.library.local_tracks.media.FAVORITES_FOLDER_PATH
+import org.spotube.spotube.modules.library.local_tracks.media.MOST_PLAYED_FOLDER_PATH
+import org.spotube.spotube.modules.library.local_tracks.media.RECENT_FOLDER_PATH
+import spotube.composeapp.generated.resources.library_local_virtual_favorites
+import spotube.composeapp.generated.resources.library_local_virtual_most_played
+import spotube.composeapp.generated.resources.library_local_virtual_recent
 import org.spotube.spotube.resources.iconsax.IconsaxPlay
+import org.spotube.spotube.resources.iconsax.IconsaxShuffle
+import org.spotube.spotube.resources.iconsax.IconsaxTrash
+import androidx.compose.ui.graphics.vector.ImageVector
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.koin.compose.koinInject
@@ -92,14 +108,25 @@ internal fun LocalTracksContent(
     onPlayFolder: () -> Unit,
     onRequestPermission: () -> Unit,
     modifier: Modifier = Modifier,
-    onManageFolders: () -> Unit = {}
+    onManageFolders: () -> Unit = {},
+    onShuffleFolder: (() -> Unit)? = null,
+    onAddToQueue: ((String) -> Unit)? = null,
+    onDeleteTrack: ((String) -> Unit)? = null,
+    onExitPlayOrder: (() -> Unit)? = null,
+    onMoveTrack: ((Int, Int) -> Unit)? = null,
+    onDragStart: () -> Unit = {},
+    onDragStop: () -> Unit = {}
 ) {
     val inset = LocalAppShellBottomInset.current
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier.widthIn(max = 960.dp).fillMaxSize()
         ) {
-            LocalTracksBreadcrumb(state, onNavigateUp, onPlayFolder, onManageFolders = onManageFolders)
+            LocalTracksBreadcrumb(
+                state, onNavigateUp, onPlayFolder,
+                onManageFolders = onManageFolders, onShuffleFolder = onShuffleFolder
+            )
+            if (state.isPlayOrder && state.currentFolderPath != null) PlayOrderBar(onExitPlayOrder)
             when {
                 !state.canAccessMedia -> MediaEmptyState(
                     Iconsax.IconsaxFolderOpen,
@@ -133,20 +160,52 @@ internal fun LocalTracksContent(
                     }
                 }
 
-                state.currentFolderPath != null && state.visibleTracks.isNotEmpty() -> LazyColumn(
+                state.currentFolderPath != null && state.visibleTracks.isNotEmpty() -> {
+                  val listState = rememberLazyListState()
+                  val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+                      if (state.isPlayOrder) onMoveTrack?.invoke(from.index, to.index)
+                  }
+                  LazyColumn(
                     Modifier.weight(1f).fillMaxWidth(),
+                    state = listState,
                     contentPadding = PaddingValues(bottom = inset + 16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                  ) {
                     items(state.visibleTracks, key = { it.path }) { track ->
+                      ReorderableItem(reorderState, key = track.path) {
+                        // Releasing a long press without moving still reaches the tile's onClick
+                        // (the click handler sees the up before the drag handle does): swallow it.
+                        val dragGesture = remember { BooleanArray(1) }
+                        val dragModifier = if (state.isPlayOrder && onMoveTrack != null) with(this) {
+                            Modifier.longPressDraggableHandle(
+                                onDragStarted = { dragGesture[0] = true; onDragStart() },
+                                onDragStopped = { dragGesture[0] = false; onDragStop() }
+                            )
+                        } else Modifier
                         PlayableListTile(
                             track.title,
                             track.subtitle ?: stringResource(Res.string.media_unknown_artist),
                             imageModel = track.artwork,
-                            onClick = { onPlayTrack(track.path) },
+                            isPlaying = track.isPlaying,
+                            onClick = { if (!dragGesture[0]) onPlayTrack(track.path) },
                             onPlay = { onPlayTrack(track.path) },
+                            onAddToQueue = onAddToQueue?.let { add -> { add(track.path) } },
+                            modifier = dragModifier,
                             compact = true,
                             trailingContent = {
+                                onDeleteTrack?.let { delete ->
+                                    MillenniumIconButton(
+                                        onClick = { delete(track.path) },
+                                        modifier = Modifier.size(32.dp),
+                                        style = MillenniumIconButtonStyle.Quiet
+                                    ) {
+                                        MillenniumIcon(
+                                            Iconsax.IconsaxTrash,
+                                            stringResource(Res.string.library_local_delete_content_description),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                                 track.durationLabel?.let {
                                     Text(
                                         it,
@@ -155,7 +214,9 @@ internal fun LocalTracksContent(
                                     )
                                 }
                             })
+                      }
                     }
+                  }
                 }
 
                 else -> {
@@ -193,12 +254,42 @@ internal fun LocalTracksContent(
 }
 
 @Composable
+private fun PlayOrderBar(onExit: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().height(36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MillenniumIcon(
+            Iconsax.IconsaxShuffle, null,
+            modifier = Modifier.size(14.dp), tint = AppTheme.colors.primary
+        )
+        Text(
+            stringResource(Res.string.library_local_play_order),
+            style = AppTheme.typography.labelSmall,
+            modifier = Modifier.weight(1f)
+        )
+        if (onExit != null) MillenniumButton(
+            onClick = onExit,
+            style = MillenniumButtonStyle.Quiet,
+            modifier = Modifier.height(28.dp),
+            padding = PaddingValues(horizontal = 8.dp),
+            minSize = DpSize(0.dp, 28.dp),
+            foreground = AppTheme.colors.primary
+        ) {
+            Text(stringResource(Res.string.library_local_play_order_exit), style = AppTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
 internal fun LocalTracksBreadcrumb(
     state: LibraryLocalTracksState,
     onNavigateUp: () -> Unit,
     onPlayFolder: () -> Unit,
     modifier: Modifier = Modifier,
-    onManageFolders: (() -> Unit)? = null
+    onManageFolders: (() -> Unit)? = null,
+    onShuffleFolder: (() -> Unit)? = null
 ) {
     val backDescription = stringResource(Res.string.library_local_back)
     Row(
@@ -238,7 +329,8 @@ internal fun LocalTracksBreadcrumb(
                     tint = AppTheme.colors.onSurfaceVariant
                 )
                 Text(
-                    state.currentFolder?.name ?: stringResource(Res.string.library_local_folder),
+                    state.currentFolder?.let { localFolderTitle(it.path, it.name) }
+                        ?: stringResource(Res.string.library_local_folder),
                     style = AppTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -283,6 +375,16 @@ internal fun LocalTracksBreadcrumb(
                 modifier = Modifier.size(22.dp)
             )
         }
+        if (state.currentFolderPath != null && onShuffleFolder != null) MillenniumIconButton(
+            onClick = onShuffleFolder, enabled = state.canPlayFolder,
+            modifier = Modifier.size(40.dp), style = MillenniumIconButtonStyle.Quiet
+        ) {
+            MillenniumIcon(
+                Iconsax.IconsaxShuffle,
+                stringResource(Res.string.collection_details_shuffle_play),
+                modifier = Modifier.size(22.dp)
+            )
+        }
         if (state.currentFolderPath != null) MillenniumIconButton(
             onClick = onPlayFolder, enabled = state.canPlayFolder,
             modifier = Modifier.size(40.dp), style = MillenniumIconButtonStyle.Quiet
@@ -309,14 +411,14 @@ internal fun LocalFolderRow(folder: LocalFolderUi, onClick: () -> Unit) {
         leading = {
             MediaArtwork(
                 folder.artwork,
-                folder.name,
+                localFolderTitle(folder.path, folder.name),
                 Modifier.size(36.dp),
-                placeholderIcon = Iconsax.IconsaxFolderOpen
+                placeholderIcon = localFolderIcon(folder.path)
             )
         },
         title = {
             Text(
-                folder.name,
+                localFolderTitle(folder.path, folder.name),
                 style = AppTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -339,4 +441,20 @@ internal fun LocalFolderRow(folder: LocalFolderUi, onClick: () -> Unit) {
             )
         }
     )
+}
+
+/** Virtual collections have no real name on disk, so their title comes from string resources. */
+@Composable
+internal fun localFolderTitle(path: String, fallback: String): String = when (path) {
+    FAVORITES_FOLDER_PATH -> stringResource(Res.string.library_local_virtual_favorites)
+    RECENT_FOLDER_PATH -> stringResource(Res.string.library_local_virtual_recent)
+    MOST_PLAYED_FOLDER_PATH -> stringResource(Res.string.library_local_virtual_most_played)
+    else -> fallback
+}
+
+internal fun localFolderIcon(path: String): ImageVector = when (path) {
+    FAVORITES_FOLDER_PATH -> Iconsax.IconsaxHeart2
+    RECENT_FOLDER_PATH -> Iconsax.InconsaxClock
+    MOST_PLAYED_FOLDER_PATH -> Iconsax.IconsaxMusicPlaylist
+    else -> Iconsax.IconsaxFolderOpen
 }

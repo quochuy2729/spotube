@@ -27,6 +27,10 @@ import org.spotube.spotube.core.audioplayer.QueueStateRepository
 import org.spotube.spotube.core.db.Database
 import org.spotube.spotube.core.discovery.DeviceDiscoveryService
 import org.spotube.spotube.core.discord.DiscordRpcService
+import org.spotube.spotube.core.audioplayer.trim.TrackTrimController
+import org.spotube.spotube.core.audioplayer.trim.TrackTrimRepository
+import org.spotube.spotube.core.jam.JamRole
+import org.spotube.spotube.modules.shell.TrackTrimViewModel
 import org.spotube.spotube.core.jam.JamRoomClient
 import org.spotube.spotube.core.jam.JamRoomService
 import org.spotube.spotube.core.navigation.navigationModule
@@ -64,9 +68,15 @@ import org.spotube.spotube.modules.library.album.LibraryAlbumsViewModel
 import org.spotube.spotube.modules.library.artist.LibraryArtistsViewModel
 import org.spotube.spotube.modules.library.local_tracks.LibraryLocalTracksViewModel
 import org.spotube.spotube.modules.library.local_tracks.LocalFolderViewModel
+import org.spotube.spotube.core.ui.AppMessages
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaCacheRepository
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaFoldersConfig
+import org.spotube.spotube.modules.library.local_tracks.media.LocalCollectionsLibrary
+import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibrary
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibraryCoordinator
+import org.spotube.spotube.modules.library.local_tracks.user.LocalFavoriteViewModel
+import org.spotube.spotube.modules.library.local_tracks.user.LocalFavoritesRepository
+import org.spotube.spotube.modules.library.local_tracks.user.LocalPlayStatsRepository
 import org.spotube.spotube.modules.library.playlist.LibraryPlaylistsViewModel
 import org.spotube.spotube.modules.lyrics.LyricsViewModel
 import org.spotube.spotube.modules.playlist.AddTracksToPlaylistViewModel
@@ -92,6 +102,9 @@ import org.spotube.spotube.modules.settings.JamSettingsViewModel
 import org.spotube.spotube.modules.settings.LocalMediaFoldersViewModel
 import org.spotube.spotube.modules.shell.AppShellViewModel
 import org.spotube.spotube.modules.shell.PlayerOptionsViewModel
+import org.spotube.spotube.modules.shell.PlayerGestureViewModel
+import org.spotube.spotube.modules.shell.NowPlayingVisualsViewModel
+import org.spotube.spotube.core.audioplayer.SleepTimerController
 import org.spotube.spotube.modules.shell.alternative_track.AlternativeTrackContentViewModel
 import org.spotube.spotube.modules.shell.player_queue.PlayerQueueContentViewModel
 import org.spotube.spotube.modules.welcome.WelcomeRepository
@@ -115,8 +128,17 @@ val sharedModules = module {
     singleOf(::WebViewController)
 
     // Shell
+    single { SleepTimerController(get(), get()) }
     viewModelOf(::AppShellViewModel)
     viewModelOf(::PlayerOptionsViewModel)
+    viewModelOf(::PlayerGestureViewModel)
+    single { TrackTrimRepository(get<Database>().trackTrimDataStore) }
+    single {
+        val jam = get<JamRoomService>()
+        TrackTrimController(get(), get(), get<TrackTrimRepository>().trims, isBlocked = { jam.role.value == JamRole.Guest })
+    } withOptions { createdAtStart() }
+    viewModelOf(::TrackTrimViewModel)
+    viewModelOf(::NowPlayingVisualsViewModel)
     viewModelOf(::PlayerQueueContentViewModel)
     viewModelOf(::AlternativeTrackContentViewModel)
 
@@ -135,11 +157,16 @@ val sharedModules = module {
     singleOf(::LocalMediaCacheRepository)
     singleOf(::LocalMediaFoldersConfig)
     singleOf(::LocalMediaLibraryCoordinator)
+    singleOf(::AppMessages)
     viewModelOf(::LibraryPlaylistsViewModel)
     viewModelOf(::LibraryAlbumsViewModel)
     viewModelOf(::LibraryArtistsViewModel)
     viewModelOf(::LibraryLocalTracksViewModel)
-    viewModel { (folderPath: String) -> LocalFolderViewModel(folderPath, get(), get()) }
+    single { LocalFavoritesRepository(get<Database>().localUserDataStore) }
+    single { LocalPlayStatsRepository(get<Database>().localUserDataStore, get<ScrobbleManager>().listens) } withOptions { createdAtStart() }
+    single<LocalMediaLibrary> { LocalCollectionsLibrary(get<LocalMediaLibraryCoordinator>(), get(), get()) }
+    viewModelOf(::LocalFavoriteViewModel)
+    viewModel { (folderPath: String) -> LocalFolderViewModel(folderPath, get<LocalMediaLibrary>(), get(), get(), get(), get()) }
 
     // Plugin system
     singleOf(::PluginManager) {

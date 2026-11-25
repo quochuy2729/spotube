@@ -18,7 +18,15 @@
 package org.spotube.spotube.core.ui.theming
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 
 /** Whether the OS is in dark mode, observed live; desktop can't rely on Compose's own check under Tao. */
 @Composable
 expect fun isSystemDarkTheme(): Boolean
+
+/** The OS accent colour (Android 12+ system_accent1_500), or null when the platform has none. */
+@Composable
+expect fun systemAccentColor(): Color?
+
+/** Whether Modifier.blur really blurs here (Android 12+, desktop, iOS); older Android ignores it. */
+expect fun isBlurSupported(): Boolean

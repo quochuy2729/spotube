@@ -20,6 +20,9 @@ package org.spotube.spotube.modules.shell
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.LoopState
@@ -39,7 +42,7 @@ internal data class PlayerArtist(
 )
 
 internal data class PlayerUiState(
-    val queue: List<QueueEntry> = emptyList(),
+    val hasQueue: Boolean = false,
     val currentQueueEntry: QueueEntry? = null,
     val title: String = "No-op track title",
     val artists: String = "No-op artists",
@@ -70,7 +73,7 @@ internal data class PlayerUiState(
 
     fun toDebugString(): String {
         return """PlayerUiState(
-            queue=${queue.map { it.displayTitle() }},
+            hasQueue=$hasQueue,
             currentQueueEntry=${currentQueueEntry?.displayTitle()},
             title='$title', artists='$artists',
             album='$album', coverModel=${coverModel?.let { it::class.simpleName }},
@@ -84,12 +87,21 @@ internal data class PlayerUiState(
 @Composable
 internal fun rememberPlayerUiState(
     audioPlayer: AudioPlayerInterface,
-    audioPlayerQueue: AudioPlayerQueue
+    audioPlayerQueue: AudioPlayerQueue,
+    /** When false, [PlayerUiState.position] stays zero so the caller does not recompose on every tick. */
+    observePosition: Boolean = true
 ): PlayerUiState {
-    val queue by audioPlayerQueue.queueFlow.collectAsState(initial = emptyList())
+    val hasQueue by remember(audioPlayerQueue) {
+        audioPlayerQueue.queueFlow.map { it.isNotEmpty() }.distinctUntilChanged()
+    }.collectAsState(initial = false)
     val currentQueueEntry by audioPlayerQueue.currentQueueEntryFlow.collectAsState(initial = null)
     val playerState by audioPlayer.playerStateFlow.collectAsState()
-    val position by audioPlayer.positionFlow.collectAsState()
+    val position = if (observePosition) {
+        val observed by audioPlayer.positionFlow.collectAsState()
+        observed
+    } else {
+        Duration.ZERO
+    }
     val duration by audioPlayer.durationFlow.collectAsState()
     val loopState by audioPlayer.loopStateFlow.collectAsState()
     val isShuffling by audioPlayer.shuffleModeFlow.collectAsState()
@@ -100,7 +112,7 @@ internal fun rememberPlayerUiState(
     val unknownAlbum = stringResource(Res.string.player_unknown_album)
 
     val state = PlayerUiState(
-        queue = queue,
+        hasQueue = hasQueue,
         currentQueueEntry = currentQueueEntry,
         title = currentQueueEntry?.displayTitle().orEmpty().ifBlank { fallbackTitle },
         artists = currentQueueEntry?.displayArtists().orEmpty().ifBlank { fallbackArtists },

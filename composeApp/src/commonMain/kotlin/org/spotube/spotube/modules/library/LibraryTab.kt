@@ -28,11 +28,12 @@ import org.jetbrains.compose.resources.StringResource
 import spotube.composeapp.generated.resources.*
 
 enum class LibraryTab(val icon: ImageVector) {
+    // Order = order of the tab bar: on-device music first (usable without a plugin login).
+    LocalTracks(Iconsax.IconsaxMusicLibrary),
+    Downloads(Iconsax.IconsaxDirectboxReceive),
     Playlists(Iconsax.IconsaxMusicDashboard),
     Albums(Iconsax.IconsaxCd),
-    Artists(Iconsax.User),
-    LocalTracks(Iconsax.IconsaxMusicLibrary),
-    Downloads(Iconsax.IconsaxDirectboxReceive);
+    Artists(Iconsax.User);
 
     val titleResource: StringResource
         get() = when (this) {

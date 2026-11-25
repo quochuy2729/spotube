@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -263,6 +264,44 @@ class ScrobbleManagerTest {
         playSeconds(20)
 
         assertEquals("unknown", plugin.scrobbled.single().streamingProvider)
+    }
+
+    @Test
+    fun `listens emits once per play even without a scrobble plugin`() = runTest {
+        pluginSource.setPlugin(null)
+        val manager = createManager()
+        val listens = mutableListOf<QueueEntry>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            manager.listens.collect { listens.add(it) }
+        }
+        queue.setCurrentEntry(localEntry(url = "p1", duration = 40_000))
+        player.setPlayerState(PlayerState.PLAYING)
+
+        playSeconds(19)
+        assertEquals(0, listens.size)
+        playSeconds(10)
+        assertEquals(1, listens.size)
+        assertEquals("p1", listens.single().url)
+
+        // Replaying from the start counts as a new listen.
+        currentPositionMs = 0
+        player.setPosition(0.milliseconds)
+        playSeconds(25)
+        assertEquals(2, listens.size)
+        assertEquals(0, plugin.scrobbled.size)
+    }
+
+    @Test
+    fun `listens does not emit for tracks shorter than 30 seconds`() = runTest {
+        val manager = createManager()
+        val listens = mutableListOf<QueueEntry>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            manager.listens.collect { listens.add(it) }
+        }
+        queue.setCurrentEntry(localEntry(duration = 20_000))
+        player.setPlayerState(PlayerState.PLAYING)
+        playSeconds(20)
+        assertEquals(0, listens.size)
     }
 
     // --- fixtures ---

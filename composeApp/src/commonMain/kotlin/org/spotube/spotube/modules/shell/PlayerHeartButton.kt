@@ -29,6 +29,8 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.QueueEntry
+import org.koin.compose.viewmodel.koinViewModel
+import org.spotube.spotube.modules.library.local_tracks.user.LocalFavoriteViewModel
 import org.spotube.spotube.modules.saved_tracks.SavedState
 import org.spotube.spotube.modules.saved_tracks.SavedTracksViewModel
 import org.spotube.spotube.modules.saved_tracks.rememberIsSavedTracks
@@ -43,8 +45,20 @@ import spotube.composeapp.generated.resources.player_unlike_content_description
 @Composable
 fun PlayerHeartButton(
     audioPlayerQueue: AudioPlayerQueue,
-    savedTracksViewModel: SavedTracksViewModel) {
+    savedTracksViewModel: SavedTracksViewModel,
+    localFavoriteViewModel: LocalFavoriteViewModel = koinViewModel()) {
     val currentQueueEntry by audioPlayerQueue.currentQueueEntryFlow.collectAsStateWithLifecycle()
+    val localPath = (currentQueueEntry as? QueueEntry.LocalTrack)?.url
+    if (localPath != null) {
+        val localFavorites by localFavoriteViewModel.favorites.collectAsStateWithLifecycle()
+        val isLocalFavorite = localPath in localFavorites
+        HeartIconButton(
+            isLiked = isLocalFavorite,
+            enabled = true,
+            loading = false,
+            onClick = { localFavoriteViewModel.toggle(localPath) })
+        return
+    }
     val currentTrackId = (currentQueueEntry as? QueueEntry.StreamingTrack)?.track?.id
     val isSavedTrackState =
         rememberIsSavedTracks(trackIds = currentTrackId?.let { listOf(it) } ?: emptyList())
@@ -58,10 +72,19 @@ fun PlayerHeartButton(
         isInSavedIds
     }
 
-    MillenniumIconButton(
-        onClick = { currentTrackId?.let { savedTracksViewModel.toggleSavedTrack(it, isLiked) } },
+    HeartIconButton(
+        isLiked = isLiked,
         enabled = isSavedTrackState is SavedState.Success,
         loading = currentTrackId != null && currentTrackId in pendingSavedTrackIds,
+        onClick = { currentTrackId?.let { savedTracksViewModel.toggleSavedTrack(it, isLiked) } })
+}
+
+@Composable
+private fun HeartIconButton(isLiked: Boolean, enabled: Boolean, loading: Boolean, onClick: () -> Unit) {
+    MillenniumIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        loading = loading,
         style = MillenniumIconButtonStyle.Secondary) {
         MillenniumIcon(
             imageVector = if (isLiked) Iconsax.IconsaxHeart2 else Iconsax.IconsaxHeart,

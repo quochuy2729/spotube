@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -74,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +104,7 @@ import org.spotube.spotube.resources.iconsax.Iconsax3DotsMore
 import org.spotube.spotube.resources.iconsax.IconsaxArrowDown4
 import org.spotube.spotube.resources.iconsax.IconsaxArrowSquareUp
 import org.spotube.spotube.resources.iconsax.IconsaxCd
+import org.spotube.spotube.resources.iconsax.IconsaxEdit
 import org.spotube.spotube.resources.iconsax.IconsaxCheckCircle
 import org.spotube.spotube.resources.iconsax.IconsaxCloseSquare
 import org.spotube.spotube.resources.iconsax.IconsaxDirectboxReceive
@@ -122,6 +125,7 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
@@ -141,6 +145,9 @@ import spotube.composeapp.generated.resources.player_download_status_downloading
 import spotube.composeapp.generated.resources.player_enable_shuffle_content_description
 import spotube.composeapp.generated.resources.player_expand_lyrics_content_description
 import spotube.composeapp.generated.resources.player_go_to_album
+import spotube.composeapp.generated.resources.player_trim
+import spotube.composeapp.generated.resources.player_gesture_seek_back
+import spotube.composeapp.generated.resources.player_gesture_seek_forward
 import spotube.composeapp.generated.resources.player_loop_mode_all
 import spotube.composeapp.generated.resources.player_loop_mode_none
 import spotube.composeapp.generated.resources.player_loop_mode_one
@@ -153,6 +160,10 @@ import spotube.composeapp.generated.resources.player_play_content_description
 import spotube.composeapp.generated.resources.player_previous_content_description
 import spotube.composeapp.generated.resources.player_seek_label
 import spotube.composeapp.generated.resources.player_sleep_timer
+import spotube.composeapp.generated.resources.player_speed_value
+import spotube.composeapp.generated.resources.player_speed
+import spotube.composeapp.generated.resources.player_sleep_timer_tile_remaining
+import spotube.composeapp.generated.resources.player_sleep_timer_tile_track_end
 import spotube.composeapp.generated.resources.player_track_details
 import spotube.composeapp.generated.resources.queue_title
 
@@ -184,12 +195,14 @@ fun AppExpandedPlayer(
     audioPlayer: AudioPlayerInterface = koinInject(),
     audioPlayerQueue: AudioPlayerQueue = koinInject(),
     playerOptionsViewModel: PlayerOptionsViewModel = koinViewModel(),
+    gestureViewModel: PlayerGestureViewModel = koinViewModel(),
+    trimViewModel: TrackTrimViewModel = koinViewModel(),
     savedTracksViewModel: SavedTracksViewModel = koinViewModel<SavedTracksViewModel>(
         key = SAVED_TRACKS_COLLECTION_ID,
         parameters = { parametersOf() }
     )
 ) {
-    val playerUiState = rememberPlayerUiState(audioPlayer, audioPlayerQueue)
+    val playerUiState = rememberPlayerUiState(audioPlayer, audioPlayerQueue, observePosition = false)
     val jamRoomService: JamRoomService = koinInject()
     val isJamGuest by jamRoomService.role
         .map { it == JamRole.Guest }
@@ -199,6 +212,8 @@ fun AppExpandedPlayer(
     val navigationCommands: NavigationCommands = koinInject()
     val currentEntry by audioPlayerQueue.currentQueueEntryFlow.collectAsStateWithLifecycle()
     val playerOptionsUiState by playerOptionsViewModel.uiState.collectAsStateWithLifecycle()
+    val gestureUiState by gestureViewModel.uiState.collectAsStateWithLifecycle()
+    val swipeState = rememberPlayerSwipeState()
     val currentTrack = remember(currentEntry) {
         (currentEntry as? QueueEntry.StreamingTrack)?.track
     }
@@ -212,19 +227,11 @@ fun AppExpandedPlayer(
     val albumArtModifier =
         rememberSharedAlbumArtModifier(sharedTransitionScope, animatedVisibilityScope)
     val coverModel = playerUiState.coverModel
-    var isSeeking by remember { mutableStateOf(false) }
-    var seekProgress by remember { mutableFloatStateOf(playerUiState.progress) }
     val moreOptionsSheetState = rememberModalBottomSheetState(
         initialDetent = SheetDetent.FullyExpanded
     )
 
     PlayerOptionDialogs(viewModel = playerOptionsViewModel)
-
-    LaunchedEffect(playerUiState.progress, isSeeking) {
-        if (!isSeeking) {
-            seekProgress = playerUiState.progress
-        }
-    }
 
     fun onPlayPause() {
         scope.launch {
@@ -256,19 +263,6 @@ fun AppExpandedPlayer(
         scope.launch { audioPlayer.loop(playerUiState.loopState.next()) }
     }
 
-    fun onSeekFinished() {
-        val durationMillis = playerUiState.seekDuration.inWholeMilliseconds
-        if (durationMillis <= 0L) return
-        scope.launch {
-            audioPlayer.seekTo(
-                (durationMillis * seekProgress.coerceIn(
-                    0f,
-                    1f
-                )).toLong().milliseconds
-            )
-        }
-    }
-
     LaunchedEffect(moreOptionsSheetState.bottomSheetState.currentDetent) {
         if (moreOptionsSheetState.bottomSheetState.currentDetent == SheetDetent.Hidden) {
             playerOptionsViewModel.dismissMoreOptionsSheet()
@@ -282,6 +276,7 @@ fun AppExpandedPlayer(
     }
 
     Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.background)) {
+        NowPlayingBackdrop()
         if (playerOptionsUiState.isMoreOptionsSheetOpen) {
             MillenniumModalBottomSheet(
                 state = moreOptionsSheetState,
@@ -415,11 +410,38 @@ fun AppExpandedPlayer(
                     item {
                         OptionTile(
                             icon = Iconsax.InconsaxClock,
-                            label = stringResource(Res.string.player_sleep_timer),
+                            label = playerOptionsUiState.sleepTimerRemainingMs?.let {
+                                stringResource(Res.string.player_sleep_timer_tile_remaining, formatRemainingTime(it))
+                            } ?: if (playerOptionsUiState.sleepTimerUntilTrackEnd) {
+                                stringResource(Res.string.player_sleep_timer_tile_track_end)
+                            } else {
+                                stringResource(Res.string.player_sleep_timer)
+                            },
                             onClick = {
                                 playerOptionsViewModel.dismissMoreOptionsSheet()
                                 playerOptionsViewModel.showSleepTimerDialog()
                                 onSleepTimer()
+                            })
+                    }
+                    item {
+                        OptionTile(
+                            icon = Iconsax.IconsaxNext,
+                            label = stringResource(
+                                Res.string.player_speed_value,
+                                formatSpeed(playerOptionsUiState.playbackSpeed)) + " · " +
+                                stringResource(Res.string.player_speed),
+                            onClick = {
+                                playerOptionsViewModel.dismissMoreOptionsSheet()
+                                playerOptionsViewModel.showSpeedDialog()
+                            })
+                    }
+                    item {
+                        OptionTile(
+                            icon = Iconsax.IconsaxEdit,
+                            label = stringResource(Res.string.player_trim),
+                            onClick = {
+                                playerOptionsViewModel.dismissMoreOptionsSheet()
+                                trimViewModel.open()
                             })
                     }
                     item {
@@ -501,12 +523,27 @@ fun AppExpandedPlayer(
                         .clip(RoundedCornerShape(22.dp))
                         .background(AppTheme.colors.surfaceContainerHighest)
                 ) {
-                    AsyncImage(
-                        model = coverModel,
-                        contentDescription = playerUiState.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .playerHorizontalSwipe(
+                                state = swipeState,
+                                enabled = gestureUiState.gesturesEnabled,
+                                onSwipe = gestureViewModel::onSwipe
+                            )
+                            .playerDoubleTapSeek(
+                                enabled = gestureUiState.gesturesEnabled,
+                                onDoubleTap = gestureViewModel::onDoubleTap
+                            )
+                    ) {
+                        AsyncImage(
+                            model = coverModel,
+                            contentDescription = playerUiState.title,
+                            modifier = Modifier.fillMaxSize().playerSwipeOffset(swipeState),
+                            contentScale = ContentScale.Crop
+                        )
+                        gestureUiState.seekOverlay?.let { SeekOverlayBadge(it) }
+                    }
                 }
             }
 
@@ -553,38 +590,12 @@ fun AppExpandedPlayer(
             }
 
             Column(modifier = Modifier.padding(top = 20.dp)) {
-                MillenniumSlider(
-                    value = seekProgress,
-                    onValueChange = {
-                        seekProgress = it
-                        isSeeking = true
-                    },
-                    onValueChangeFinished = {
-                        isSeeking = false
-                        onSeekFinished()
-                    },
-                    enabled = playerUiState.seekDuration.inWholeMilliseconds > 0L,
-                    label = stringResource(Res.string.player_seek_label),
-                    modifier = Modifier.fillMaxWidth()
+                // Reads positionFlow itself so only this block recomposes on every position tick.
+                PlayerSeekSection(
+                    audioPlayer = audioPlayer,
+                    seekDuration = playerUiState.seekDuration,
+                    displayDuration = playerUiState.displayDuration
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatPlayerTime(playerUiState.position),
-                        style = AppTheme.typography.labelSmall,
-                        color = AppTheme.colors.onSurfaceVariant
-                    )
-                    Text(
-                        text = formatPlayerTime(playerUiState.displayDuration),
-                        style = AppTheme.typography.labelSmall,
-                        color = AppTheme.colors.onSurfaceVariant
-                    )
-                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -770,5 +781,85 @@ private fun OptionTile(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PlayerSeekSection(
+    audioPlayer: AudioPlayerInterface,
+    seekDuration: Duration,
+    displayDuration: Duration,
+    modifier: Modifier = Modifier
+) {
+    val position by audioPlayer.positionFlow.collectAsState()
+    val scope = rememberCoroutineScope()
+    val progress = if (seekDuration.inWholeMilliseconds > 0L) {
+        (position.inWholeMilliseconds.toFloat() / seekDuration.inWholeMilliseconds.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    var isSeeking by remember { mutableStateOf(false) }
+    var seekProgress by remember { mutableFloatStateOf(progress) }
+    LaunchedEffect(progress, isSeeking) {
+        if (!isSeeking) seekProgress = progress
+    }
+
+    Column(modifier = modifier) {
+        MillenniumSlider(
+            value = seekProgress,
+            onValueChange = {
+                seekProgress = it
+                isSeeking = true
+            },
+            onValueChangeFinished = {
+                isSeeking = false
+                val durationMillis = seekDuration.inWholeMilliseconds
+                if (durationMillis > 0L) {
+                    scope.launch {
+                        audioPlayer.seekTo((durationMillis * seekProgress.coerceIn(0f, 1f)).toLong().milliseconds)
+                    }
+                }
+            },
+            enabled = seekDuration.inWholeMilliseconds > 0L,
+            label = stringResource(Res.string.player_seek_label),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = formatPlayerTime(position),
+                style = AppTheme.typography.labelSmall,
+                color = AppTheme.colors.onSurfaceVariant
+            )
+            Text(
+                text = formatPlayerTime(displayDuration),
+                style = AppTheme.typography.labelSmall,
+                color = AppTheme.colors.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.SeekOverlayBadge(overlay: SeekOverlay) {
+    val back = overlay.direction == SeekOverlayDirection.Back
+    Box(
+        modifier = Modifier
+            .align(if (back) Alignment.CenterStart else Alignment.CenterEnd)
+            .padding(horizontal = 24.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = stringResource(if (back) Res.string.player_gesture_seek_back else Res.string.player_gesture_seek_forward),
+            style = AppTheme.typography.labelLarge,
+            color = Color.White
+        )
     }
 }

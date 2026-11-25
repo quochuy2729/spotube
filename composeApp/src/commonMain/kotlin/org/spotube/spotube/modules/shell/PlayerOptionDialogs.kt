@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.koin.compose.viewmodel.koinViewModel
 import org.spotube.plugin_interfaces.plugin_apis.audio.AudioStream
 import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.spotube.resources.iconsax.Iconsax
@@ -70,6 +71,11 @@ import spotube.composeapp.generated.resources.player_sleep_timer_minutes_label
 import spotube.composeapp.generated.resources.player_sleep_timer_minutes_placeholder
 import spotube.composeapp.generated.resources.player_sleep_timer_remaining
 import spotube.composeapp.generated.resources.player_sleep_timer_start
+import spotube.composeapp.generated.resources.player_sleep_timer_quick_minutes
+import spotube.composeapp.generated.resources.player_sleep_timer_until_track_end
+import spotube.composeapp.generated.resources.player_sleep_timer_track_end_active
+import spotube.composeapp.generated.resources.player_speed
+import spotube.composeapp.generated.resources.player_speed_value
 import spotube.composeapp.generated.resources.player_track_details
 import spotube.composeapp.generated.resources.player_track_details_active_url
 import spotube.composeapp.generated.resources.player_track_details_album
@@ -105,17 +111,31 @@ import spotube.composeapp.generated.resources.player_track_details_track_number
 import spotube.composeapp.generated.resources.common_close
 
 @Composable
-fun PlayerOptionDialogs(viewModel: PlayerOptionsViewModel) {
+fun PlayerOptionDialogs(
+    viewModel: PlayerOptionsViewModel,
+    trimViewModel: TrackTrimViewModel = koinViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    TrackTrimDialog(trimViewModel)
 
     if (uiState.isSleepTimerDialogOpen) {
         SleepTimerDialog(
             minutes = uiState.sleepTimerMinutes,
             remainingMs = uiState.sleepTimerRemainingMs,
+            untilTrackEnd = uiState.sleepTimerUntilTrackEnd,
+            onQuickMinutes = viewModel::startSleepTimerMinutes,
+            onUntilTrackEnd = viewModel::startSleepTimerUntilTrackEnd,
             onMinutesChange = viewModel::updateSleepTimerMinutes,
             onStart = viewModel::startSleepTimer,
             onCancelTimer = viewModel::cancelSleepTimer,
             onDismiss = viewModel::dismissSleepTimerDialog)
+    }
+
+    if (uiState.isSpeedDialogOpen) {
+        PlaybackSpeedDialog(
+            currentSpeed = uiState.playbackSpeed,
+            onSelect = viewModel::setPlaybackSpeed,
+            onDismiss = viewModel::dismissSpeedDialog)
     }
 
     uiState.trackDetails?.let { details ->
@@ -129,6 +149,9 @@ fun PlayerOptionDialogs(viewModel: PlayerOptionsViewModel) {
 private fun SleepTimerDialog(
     minutes: String,
     remainingMs: Long?,
+    untilTrackEnd: Boolean,
+    onQuickMinutes: (Long) -> Unit,
+    onUntilTrackEnd: () -> Unit,
     onMinutesChange: (String) -> Unit,
     onStart: () -> Unit,
     onCancelTimer: () -> Unit,
@@ -144,10 +167,33 @@ private fun SleepTimerDialog(
                     text = stringResource(Res.string.player_sleep_timer_remaining, formatRemainingTime(remainingMs)),
                     style = AppTheme.typography.bodyMedium,
                     color = AppTheme.colors.primary)
+            } else if (untilTrackEnd) {
+                Text(
+                    text = stringResource(Res.string.player_sleep_timer_track_end_active),
+                    style = AppTheme.typography.bodyMedium,
+                    color = AppTheme.colors.primary)
             } else {
                 Text(
                     text = stringResource(Res.string.player_sleep_timer_description),
                     style = AppTheme.typography.bodyMedium)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PlayerOptionsViewModel.SLEEP_TIMER_QUICK_MINUTES.forEach { quick ->
+                    MillenniumButton(
+                        onClick = { onQuickMinutes(quick) },
+                        style = MillenniumButtonStyle.Secondary,
+                        modifier = Modifier.weight(1f)) {
+                        Text(stringResource(Res.string.player_sleep_timer_quick_minutes, quick))
+                    }
+                }
+            }
+            MillenniumButton(
+                onClick = onUntilTrackEnd,
+                style = MillenniumButtonStyle.Secondary,
+                modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(Res.string.player_sleep_timer_until_track_end))
             }
             val minutesState = rememberTextFieldState(minutes)
             LaunchedEffect(minutesState.text) {
@@ -160,7 +206,7 @@ private fun SleepTimerDialog(
                 modifier = Modifier.fillMaxWidth())
         }
         MillenniumDialogFooter {
-            if (remainingMs != null) {
+            if (remainingMs != null || untilTrackEnd) {
                 MillenniumButton(
                     onClick = onCancelTimer,
                     style = MillenniumButtonStyle.Quiet) { Text(stringResource(Res.string.player_sleep_timer_cancel)) }
@@ -175,6 +221,46 @@ private fun SleepTimerDialog(
             }
         }
     }
+}
+
+@Composable
+private fun PlaybackSpeedDialog(
+    currentSpeed: Float,
+    onSelect: (Float) -> Unit,
+    onDismiss: () -> Unit) {
+    MillenniumDialog(visible = true, onDismissRequest = onDismiss) {
+        MillenniumDialogHeader {
+            MillenniumDialogTitle(stringResource(Res.string.player_speed))
+            MillenniumDialogClose()
+        }
+        MillenniumDialogBody {
+            PlayerOptionsViewModel.PLAYBACK_SPEEDS.chunked(3).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { speed ->
+                        MillenniumButton(
+                            onClick = { onSelect(speed) },
+                            style = if (speed == currentSpeed) MillenniumButtonStyle.Primary else MillenniumButtonStyle.Secondary,
+                            modifier = Modifier.weight(1f)) {
+                            Text(stringResource(Res.string.player_speed_value, formatSpeed(speed)))
+                        }
+                    }
+                }
+            }
+        }
+        MillenniumDialogFooter {
+            MillenniumButton(
+                onClick = onDismiss,
+                style = MillenniumButtonStyle.Secondary) { Text(stringResource(Res.string.common_close)) }
+        }
+    }
+}
+
+/** 1.0 -> "1", 0.75 -> "0.75". */
+internal fun formatSpeed(speed: Float): String {
+    val text = speed.toString()
+    return if (text.endsWith(".0")) text.dropLast(2) else text
 }
 
 @Composable
@@ -415,7 +501,7 @@ private fun streamFormatAndQuality(stream: AudioStream): String = when (stream) 
     }
 }
 
-private fun formatRemainingTime(milliseconds: Long): String {
+internal fun formatRemainingTime(milliseconds: Long): String {
     val totalSeconds = (milliseconds / 1_000).coerceAtLeast(0)
     val hours = totalSeconds / 3_600
     val minutes = (totalSeconds % 3_600) / 60

@@ -36,7 +36,7 @@ import kotlinx.coroutines.flow.update
 enum class LibraryViewMode { Grid, List }
 
 data class LibraryToolbarUiState(
-    val currentTab: LibraryTab = LibraryTab.Playlists,
+    val currentTab: LibraryTab = LibraryTab.LocalTracks,
     val searchMode: Boolean = false,
     val searchState: TextFieldState = TextFieldState(),
     val canFilter: Boolean = true,
@@ -52,7 +52,7 @@ data class LibraryToolbarUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryState : ViewModel() {
     private val searchMode = MutableStateFlow(false)
-    val currentTab = MutableStateFlow(LibraryTab.Playlists)
+    val currentTab = MutableStateFlow(LibraryTab.LocalTracks)
     private val searchStates = LibraryTab.entries.associateWith { TextFieldState() }
     private val createPlaylistVisible = MutableStateFlow(false)
     private val viewModes = MutableStateFlow<Map<LibraryTab, LibraryViewMode>>(emptyMap())
@@ -81,7 +81,12 @@ class LibraryState : ViewModel() {
         )
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,
-        LibraryToolbarUiState(searchState = searchStates.getValue(LibraryTab.Playlists))
+        LibraryToolbarUiState(
+            searchState = searchStates.getValue(LibraryTab.LocalTracks),
+            canCreatePlaylist = false,
+            canRefresh = true,
+            canChangeView = false
+        )
     )
 
     fun queryFlow(tab: LibraryTab) = snapshotFlow { searchStates.getValue(tab).text.toString() }

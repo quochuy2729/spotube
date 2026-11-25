@@ -70,7 +70,9 @@ class JvmLocalMediaDiscoveryService : LocalMediaDiscoveryService {
                                 artists = metadata?.artists?.takeIf { it.isNotEmpty() } ?: emptyList(),
                                 durationMs = metadata?.durationMs ?: 0L,
                                 album = metadata?.album,
-                                coverBytes = metadata?.coverBytes)
+                                coverBytes = metadata?.coverBytes,
+                                trackNumber = metadata?.trackNumber?.toInt(),
+                                discNumber = metadata?.discNumber?.toInt())
                             folders.getOrPut(parent) { mutableListOf() }.add(track)
                         }
                 }
@@ -84,7 +86,7 @@ class JvmLocalMediaDiscoveryService : LocalMediaDiscoveryService {
                 LocalMediaFolder(
                     path = path,
                     name = Path.of(path).fileName?.toString().orEmpty().ifBlank { path },
-                    tracks = tracks.sortedBy { it.name.lowercase(Locale.getDefault()) })
+                    tracks = tracks.sortedWith(LocalMediaTrackComparator))
             }
             .sortedBy { it.name.lowercase(Locale.getDefault()) }
     }

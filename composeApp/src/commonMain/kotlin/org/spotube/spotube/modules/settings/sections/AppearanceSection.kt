@@ -54,6 +54,7 @@ import org.spotube.spotube.modules.settings.Theme
 import org.spotube.spotube.modules.settings.UserSettings
 import org.spotube.spotube.modules.settings.components.SelectionSettingCard
 import org.spotube.spotube.modules.settings.components.SettingCardItem
+import org.spotube.spotube.modules.settings.components.SwitchSettingCard
 import org.spotube.spotube.resources.iconsax.Iconsax
 import org.spotube.spotube.resources.iconsax.IconsaxColorSwatch
 import org.spotube.spotube.resources.iconsax.IconsaxMagic
@@ -112,6 +113,34 @@ internal fun LazyListScope.appearanceSection(
                         settingsViewModel.updateSettings {
                             copy(palette = palette)
                         }
+                    })
+            },
+            {
+                SwitchSettingCard(
+                    title = stringResource(Res.string.settings_pure_black_title),
+                    subtitle = stringResource(Res.string.settings_pure_black_subtitle),
+                    icon = {
+                        SettingsItemIcon(
+                            Iconsax.IconsaxColorSwatch,
+                            stringResource(Res.string.settings_pure_black_title))
+                    },
+                    checked = settings.pureBlack,
+                    onCheckedChange = { enabled ->
+                        settingsViewModel.updateSettings { copy(pureBlack = enabled) }
+                    })
+            },
+            {
+                SwitchSettingCard(
+                    title = stringResource(Res.string.settings_system_accent_title),
+                    subtitle = stringResource(Res.string.settings_system_accent_subtitle),
+                    icon = {
+                        SettingsItemIcon(
+                            Iconsax.IconsaxMagic,
+                            stringResource(Res.string.settings_system_accent_title))
+                    },
+                    checked = settings.useSystemAccent,
+                    onCheckedChange = { enabled ->
+                        settingsViewModel.updateSettings { copy(useSystemAccent = enabled) }
                     })
             })
     )

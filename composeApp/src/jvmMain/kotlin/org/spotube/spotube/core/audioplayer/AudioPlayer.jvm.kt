@@ -43,6 +43,8 @@ import uk.co.caprica.vlcj.player.base.State
 import uk.co.caprica.vlcj.player.component.AudioListPlayerComponent
 import uk.co.caprica.vlcj.player.list.MediaListPlayer
 import uk.co.caprica.vlcj.player.list.PlaybackMode
+import java.io.File
+import java.net.URI
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.time.Duration
@@ -70,6 +72,13 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
     private var currentIndex = -1
     private var pendingNextIndex: Int? = null
     private var shuffleEnabled = false
+
+    /**
+     * True after the VLC media list was swapped while a track keeps playing. libvlc's list
+     * player keeps its old item index, so its next auto-advance may target the wrong item.
+     * Cleared whenever we explicitly play an index (which re-syncs VLC's cursor).
+     */
+    private var vlcCursorStale = false
     private var disposed = false
     private var hasStartedPlayback = false
     private var positionPollingJob: Job? = null
@@ -191,7 +200,9 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
                 item: uk.co.caprica.vlcj.media.MediaRef
             ) {
                 lock.withLock {
-                    val targetIndex = pendingNextIndex ?: run {
+                    val pending = pendingNextIndex
+                    pendingNextIndex = null
+                    val targetIndex = pending ?: run {
                         val currentMrl = runCatching {
                             val media = item.newMedia()
                             try {
@@ -201,10 +212,21 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
                             }
                         }.getOrNull()
 
-                        if (currentMrl != null) {
-                            currentPlaylist.indexOfFirst { it.toMrl() == currentMrl }
-                        } else {
-                            -1
+                        if (currentMrl != null) indexOfMrlLocked(currentMrl) else -1
+                    }
+
+                    // VLC auto-advanced using a cursor from before the media list was rebuilt
+                    // (shuffle/reorder), so it may have picked the wrong track. Jump to the
+                    // track that actually follows the current one in our playlist.
+                    if (pending == null && vlcCursorStale) {
+                        vlcCursorStale = false
+                        val expected = expectedAutoAdvanceIndexLocked()
+                        if (expected != null && expected != targetIndex) {
+                            logger.d { "nextItem: VLC advanced from stale cursor to $targetIndex, correcting to $expected" }
+                            currentIndex = expected
+                            _currentMediaItem.tryEmit(currentPlaylist[expected])
+                            schedulePlayLocked(expected)
+                            return
                         }
                     }
 
@@ -215,12 +237,23 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
                     } else {
                         logger.w { "nextItem: invalid targetIndex=$targetIndex, currentIndex remains $currentIndex" }
                     }
-
-                    pendingNextIndex = null
                 }
             }
 
             override fun mediaListPlayerFinished(mediaListPlayer: uk.co.caprica.vlcj.player.list.MediaListPlayer) {
+                // With a stale cursor VLC can believe the list ended (e.g. shuffle toggled on
+                // the last track) while our playlist still has tracks after the current one.
+                val resumed = lock.withLock {
+                    if (disposed || !vlcCursorStale) return@withLock false
+                    vlcCursorStale = false
+                    val expected = expectedAutoAdvanceIndexLocked() ?: return@withLock false
+                    logger.d { "mediaListPlayerFinished: stale cursor, continuing at $expected" }
+                    currentIndex = expected
+                    _currentMediaItem.tryEmit(currentPlaylist[expected])
+                    schedulePlayLocked(expected)
+                    true
+                }
+                if (resumed) return
                 _playerState.tryEmit(PlayerState.COMPLETED)
                 _completion.tryEmit(Unit)
             }
@@ -253,7 +286,7 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
             if (hasStartedPlayback) {
                 mediaListPlayer.controls().setPause(false)
             } else {
-                mediaListPlayer.controls().play(currentIndex)
+                playVlcIndexLocked(currentIndex)
             }
         }
     }
@@ -375,7 +408,7 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
 
             hasStartedPlayback = false
             if (autoPlay) {
-                mediaListPlayer.controls().play(normalizedStartPosition)
+                playVlcIndexLocked(normalizedStartPosition)
             } else {
                 _playerState.tryEmit(PlayerState.PAUSED)
             }
@@ -476,7 +509,7 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
             currentIndex = nextIndex
             _currentMediaItem.value = currentPlaylist[nextIndex]
             pendingNextIndex = nextIndex
-            mediaListPlayer.controls().play(nextIndex)
+            playVlcIndexLocked(nextIndex)
         }
     }
 
@@ -488,7 +521,7 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
             currentIndex = prevIndex
             _currentMediaItem.value = currentPlaylist[prevIndex]
             pendingNextIndex = prevIndex
-            mediaListPlayer.controls().play(prevIndex)
+            playVlcIndexLocked(prevIndex)
         }
     }
 
@@ -498,7 +531,7 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
             currentIndex = index
             _currentMediaItem.tryEmit(currentPlaylist[index])
             pendingNextIndex = index
-            mediaListPlayer.controls().play(index)
+            playVlcIndexLocked(index)
         }
     }
 
@@ -563,6 +596,59 @@ actual class AudioPlayer actual constructor(context: Any) : AudioPlayerInterface
         }
         mediaListPlayer.list().setMediaList(mediaList.newMediaListRef())
         oldList.release()
+        // libvlc keeps its previous item index across setMediaList.
+        vlcCursorStale = true
+    }
+
+    /** Plays [index] in the VLC list; this also re-syncs VLC's internal cursor. */
+    private fun playVlcIndexLocked(index: Int) {
+        vlcCursorStale = false
+        mediaListPlayer.controls().play(index)
+    }
+
+    /**
+     * Plays [index] off the VLC event thread (native calls from event callbacks are not
+     * allowed). Skipped if another explicit navigation happened in the meantime.
+     */
+    private fun schedulePlayLocked(index: Int) {
+        pendingNextIndex = index
+        mediaPlayer.submit {
+            lock.withLock {
+                if (!disposed && pendingNextIndex == index && index in currentPlaylist.indices) {
+                    playVlcIndexLocked(index)
+                }
+            }
+        }
+    }
+
+    /** The track VLC should move to when the current one ends naturally, or null if none. */
+    private fun expectedAutoAdvanceIndexLocked(): Int? {
+        if (currentPlaylist.isEmpty()) return null
+        val next = when (_loopState.value) {
+            LoopState.ONE -> currentIndex
+            LoopState.ALL -> (currentIndex + 1) % currentPlaylist.size
+            LoopState.NONE -> currentIndex + 1
+        }
+        return next.takeIf { it in currentPlaylist.indices }
+    }
+
+    private fun indexOfMrlLocked(mrl: String): Int {
+        val key = mrlKey(mrl)
+        return currentPlaylist.indexOfFirst { mrlKey(it.toMrl()) == key }
+    }
+
+    /**
+     * VLC reports local files as percent-encoded `file:///` URIs even when they were added as
+     * plain paths (e.g. `D:\Music\a.mp3`), so compare both sides as absolute file paths.
+     */
+    private fun mrlKey(value: String): String {
+        val path = when {
+            value.startsWith("file:", ignoreCase = true) ->
+                runCatching { File(URI(value)).absolutePath }.getOrNull()
+            !value.contains("://") -> runCatching { File(value).absolutePath }.getOrNull()
+            else -> null
+        }
+        return path ?: value
     }
 
     private fun startPositionPolling() {

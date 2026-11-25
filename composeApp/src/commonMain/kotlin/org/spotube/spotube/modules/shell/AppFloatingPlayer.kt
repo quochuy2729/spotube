@@ -67,6 +67,8 @@ import spotube.composeapp.generated.resources.player_nothing_playing
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.core.parameter.parametersOf
 import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 
@@ -190,13 +192,13 @@ internal fun FloatingPlayerContent(
                     }
                     Column(modifier = Modifier.padding(start = 10.dp)) {
                         Text(
-                            text = if (playerUiState.queue.isEmpty()) stringResource(Res.string.player_nothing_playing) else playerUiState.title,
+                            text = if (!playerUiState.hasQueue) stringResource(Res.string.player_nothing_playing) else playerUiState.title,
                             style = AppTheme.typography.bodyMedium,
                             color = AppTheme.colors.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (playerUiState.queue.isNotEmpty()) Text(
+                        if (playerUiState.hasQueue) Text(
                             text = playerUiState.artists,
                             style = AppTheme.typography.bodySmall,
                             color = AppTheme.colors.onSurfaceVariant,
@@ -211,7 +213,7 @@ internal fun FloatingPlayerContent(
                     Spacer(modifier = Modifier.size(8.dp))
                     MillenniumIconButton(
                         onClick = onPlayPause,
-                        enabled = playerUiState.queue.isNotEmpty(),
+                        enabled = playerUiState.hasQueue,
                         style = MillenniumIconButtonStyle.Secondary
                     ) {
                         MillenniumIcon(

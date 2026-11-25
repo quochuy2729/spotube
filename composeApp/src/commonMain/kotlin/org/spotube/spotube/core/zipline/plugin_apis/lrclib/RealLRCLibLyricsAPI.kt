@@ -17,6 +17,7 @@
 
 package org.spotube.spotube.core.zipline.plugin_apis.lrclib
 
+import org.spotube.spotube.core.lyrics.LrcParser
 import org.koin.core.component.inject
 import org.koin.core.component.KoinComponent
 import org.spotube.spotube.core.network.HttpJson
@@ -91,14 +92,7 @@ class RealLRCLibLyricsAPI : LyricsAPI, KoinComponent {
     override suspend fun getLyrics(track: MetadataTrack): LyricsResponse? {
         val response = getLRCLibLyrics(track) ?: return null
         return LyricsResponse(
-            syncedLyrics = response.syncedLyrics?.lines()?.mapNotNull { line ->
-                val match = Regex("\\[(\\d{2}):(\\d{2}\\.\\d{2})]").find(line) ?: return@mapNotNull null
-                val minutes = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-                val seconds = match.groupValues[2].toDoubleOrNull() ?: return@mapNotNull null
-                val timeMs = (minutes * 60 * 1000 + (seconds * 1000)).toLong()
-                val text = line.substring(match.range.last + 1).trim()
-                LyricsLine(time = timeMs, text = text)
-            },
+            syncedLyrics = response.syncedLyrics?.let(LrcParser::parse),
             plainLyrics = response.plainLyrics)
     }
 }

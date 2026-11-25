@@ -22,11 +22,12 @@ import androidx.lifecycle.viewModelScope
 import org.spotube.spotube.modules.library.LibraryState
 import org.spotube.spotube.modules.library.LibraryTab
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaFolder
-import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibraryCoordinator
+import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibrary
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -38,19 +39,23 @@ import org.jetbrains.compose.resources.getString
 import spotube.composeapp.generated.resources.Res
 import spotube.composeapp.generated.resources.library_local_refresh_failed
 
+@Immutable
 data class LocalFolderUi(
     val path: String,
     val name: String,
     val trackCount: Int,
-    val artwork: ByteArray?
+    val artwork: ByteArray?,
+    val isVirtual: Boolean = false
 )
 
+@Immutable
 data class LocalTrackUi(
     val path: String,
     val title: String,
     val subtitle: String?,
     val durationLabel: String?,
-    val artwork: ByteArray?
+    val artwork: ByteArray?,
+    val isPlaying: Boolean = false
 )
 
 data class LibraryLocalTracksState(
@@ -65,7 +70,9 @@ data class LibraryLocalTracksState(
     val currentFolder: LocalMediaFolder? = null,
     val totalFolderCount: Int = 0,
     val totalTrackCount: Int = 0,
-    val canPlayFolder: Boolean = false
+    val canPlayFolder: Boolean = false,
+    /** True while the folder list mirrors the live play queue (after Shuffle) and can be reordered. */
+    val isPlayOrder: Boolean = false
 )
 
 internal fun localTracksUiState(
@@ -90,6 +97,8 @@ internal fun localTracksUiState(
                 it.name,
                 it.trackCount,
                 it.tracks.firstOrNull { track -> track.coverBytes?.isNotEmpty() == true }?.coverBytes
+                    .takeIf { _ -> !it.isVirtual },
+                it.isVirtual
             )
         },
         visibleTracks = tracks.map { track ->
@@ -105,8 +114,8 @@ internal fun localTracksUiState(
                 }" else null,
                 track.coverBytes?.takeIf { it.isNotEmpty() })
         },
-        totalFolderCount = source.folders.size,
-        totalTrackCount = source.folders.sumOf { it.trackCount },
+        totalFolderCount = source.folders.count { !it.isVirtual },
+        totalTrackCount = source.folders.filter { !it.isVirtual }.sumOf { it.trackCount },
         canPlayFolder = source.canAccessMedia && tracks.isNotEmpty()
     )
 }
@@ -118,7 +127,7 @@ private fun localTrackMatches(track: LocalMediaTrack, query: String): Boolean = 
 ) == true || track.artists.any { it.contains(query, true) }
 
 class LibraryLocalTracksViewModel(
-    private val coordinator: LocalMediaLibraryCoordinator,
+    private val coordinator: LocalMediaLibrary,
     private val libraryState: LibraryState
 ) : ViewModel() {
     private val requiresPermission = getPlatform().type == PlatformType.Android

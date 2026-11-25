@@ -24,6 +24,10 @@ import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.QueueEntry
 import org.spotube.spotube.modules.plugin.PluginManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.spotube.plugin_interfaces.plugin_apis.lyrics.LyricsResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -80,57 +84,92 @@ class LyricsViewModel(
     fun loadLyrics(forceReload: Boolean = false) {
         viewModelScope.launch {
             val entry = audioPlayerQueue.currentQueueEntryFlow.value ?: return@launch
-            val track = when (entry) {
-                is QueueEntry.StreamingTrack -> entry.track
-                is QueueEntry.LocalTrack -> return@launch
-            }
+            val key = entry.lyricsKey()
 
-            if (!forceReload && currentTrackId == track.id && _uiState.value.syncedLyrics != null) {
+            if (!forceReload && currentTrackId == key && _uiState.value.syncedLyrics != null) {
                 return@launch
             }
 
-            currentTrackId = track.id
+            currentTrackId = key
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                pluginManager.selectedLyricsPlugin.value?.let { pluginService ->
-                    pluginService.use {
-                       val lyrics = lyricsAPI.getLyrics(track)
-
-                        _uiState.update {
-                            it.copy(
-                                syncedLyrics = lyrics?.syncedLyrics,
-                                plainLyrics = lyrics?.plainLyrics,
-                                isLoading = false)
-                        }
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(isLoading = false) }
+                // A .lrc file next to a local track wins over any online lookup.
+                val sidecar = (entry as? QueueEntry.LocalTrack)?.let { local ->
+                    withContext(Dispatchers.Default) { readSidecarLyrics(local.url) }
                 }
+                if (sidecar != null) {
+                    publish(key, sidecar)
+                    return@launch
+                }
+                val track = when (entry) {
+                    is QueueEntry.StreamingTrack -> entry.track
+                    is QueueEntry.LocalTrack -> entry.toLyricsSearchTrack()
+                }
+                val plugin = pluginManager.selectedLyricsPlugin.value
+                if (plugin == null) {
+                    publish(key, null)
+                } else {
+                    val lyrics = plugin.use { lyricsAPI.getLyrics(track) }
+                    publish(key, lyrics)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                if (currentTrackId == key) _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
+    }
+
+    /** Applies a result only if the track it was loaded for is still the current one. */
+    private fun publish(key: String, lyrics: LyricsResponse?) {
+        if (currentTrackId != key) return
+        _uiState.update {
+            it.copy(
+                syncedLyrics = lyrics?.syncedLyrics,
+                plainLyrics = lyrics?.plainLyrics,
+                isLoading = false)
+        }
+    }
+
+    private fun QueueEntry.lyricsKey(): String = when (this) {
+        is QueueEntry.StreamingTrack -> track.id
+        is QueueEntry.LocalTrack -> url
     }
 
     init {
         viewModelScope.launch {
             audioPlayerQueue.currentQueueEntryFlow.collect { entry ->
-                val trackId = when (entry) {
-                    is QueueEntry.StreamingTrack -> entry.track.id
-                    else -> null
-                }
-                if (entry is QueueEntry.StreamingTrack) {
-                    val track = entry.track
+                val key = entry?.lyricsKey()
+                // Switching tracks must not keep showing the previous track's lyrics (this used to
+                // leak the last online track's lyrics into the preview of a local track).
+                if (key != currentTrackId) {
+                    currentTrackId = null
                     _uiState.update {
-                        it.copy(
-                            trackTitle = track.title,
-                            trackArtists = track.artists.joinToString(", ") { artist -> artist.name },
-                            coverUrl = (track.album?.thumbnails ?: track.thumbnails)
-                                ?.firstOrNull()?.url.orEmpty()
-                        )
+                        it.copy(syncedLyrics = null, plainLyrics = null, error = null, isLoading = false)
                     }
                 }
-                if (trackId != null && trackId != currentTrackId) {
+                when (entry) {
+                    is QueueEntry.StreamingTrack -> {
+                        val track = entry.track
+                        _uiState.update {
+                            it.copy(
+                                trackTitle = track.title,
+                                trackArtists = track.artists.joinToString(", ") { artist -> artist.name },
+                                coverUrl = (track.album?.thumbnails ?: track.thumbnails)
+                                    ?.firstOrNull()?.url.orEmpty()
+                            )
+                        }
+                    }
+                    is QueueEntry.LocalTrack -> _uiState.update {
+                        it.copy(
+                            trackTitle = entry.name,
+                            trackArtists = entry.artists.joinToString(", "),
+                            coverUrl = ""
+                        )
+                    }
+                    null -> Unit
+                }
+                if (key != null && key != currentTrackId) {
                     loadLyrics()
                 }
             }

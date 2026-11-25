@@ -119,7 +119,9 @@ class FakeAudioPlayer : AudioPlayerInterface {
         insertAtNextCallCount++
         lastInsertedMediaItem = mediaItem
         val updated = _playlistFlow.value.toMutableList()
-        updated.add(mediaItem)
+        val currentIndex = _currentMediaItemFlow.value
+            ?.let { current -> updated.indexOfFirst { it.url == current.url } } ?: -1
+        updated.add((currentIndex + 1).coerceIn(0, updated.size), mediaItem)
         _playlistFlow.value = updated
     }
 

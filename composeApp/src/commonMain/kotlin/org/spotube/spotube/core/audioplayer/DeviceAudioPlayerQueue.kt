@@ -127,14 +127,15 @@ class DeviceAudioPlayerQueue(
         startPosition: Int,
         collectionEntry: QueueCollectionEntry?) {
         logger.i { "Loading queue with ${entries.size} entries, autoPlay=$autoPlay, startPosition=$startPosition" }
-        val mediaItems = entries.mapNotNull { it.toMediaItem() }
+        val pairs = entries.toMediaPairs()
+        val mediaItems = pairs.map { it.first }
         if (mediaItems.isEmpty()) {
             logger.w { "load: no valid media items after filtering blanks" }
         }
         val normalizedStartPosition =
             if (mediaItems.isEmpty()) 0 else startPosition.coerceIn(0, mediaItems.lastIndex)
         logger.d { "Normalized start position: $startPosition -> $normalizedStartPosition" }
-        entryByMediaUrl.value = mediaItems.associate { it.url to entries.firstOrNull { e -> e.toMediaItem()?.url == it.url }!! }
+        entryByMediaUrl.value = pairs.associate { (item, entry) -> item.url to entry }
         updateCollectionContext(collectionEntry)
         audioPlayer.load(mediaItems, autoPlay, normalizedStartPosition)
         persistQueueStateIfReady()
@@ -160,16 +161,14 @@ class DeviceAudioPlayerQueue(
         }
 
         logger.i { "Adding ${entries.size} entries to queue" }
-        val mediaItems = entries.mapNotNull { it.toMediaItem() }
-        if (mediaItems.isEmpty()) {
+        val pairs = entries.toMediaPairs()
+        if (pairs.isEmpty()) {
             logger.w { "addAllToQueue: all entries had blank urls, skipping" }
             return
         }
-        val validEntries = entries.zip(mediaItems).map { (entry) ->
-            entry
-        }
+        val mediaItems = pairs.map { it.first }
         entryByMediaUrl.update {
-            it + mediaItems.zip(validEntries).associate { (mediaItem, entry) -> mediaItem.url to entry }
+            it + pairs.associate { (item, entry) -> item.url to entry }
         }
 
         updateCollectionContext(collectionEntry)
@@ -189,17 +188,18 @@ class DeviceAudioPlayerQueue(
         }
 
         logger.i { "Adding ${entries.size} entries after current position" }
-        val mediaItems = entries.mapNotNull { it.toMediaItem() }
-        if (mediaItems.isEmpty()) {
+        val pairs = entries.toMediaPairs()
+        if (pairs.isEmpty()) {
             logger.w { "addAllAfterCurrent: all entries had blank urls, skipping" }
             return
         }
-        val validEntries = entries.zip(mediaItems).map { (entry) -> entry }
+        val mediaItems = pairs.map { it.first }
         entryByMediaUrl.update {
-            it + mediaItems.zip(validEntries).associate { (mediaItem, entry) -> mediaItem.url to entry }
+            it + pairs.associate { (item, entry) -> item.url to entry }
         }
 
-        mediaItems.forEach { mediaItem ->
+        // Each item is inserted right after the current one, so insert in reverse to keep the original order.
+        mediaItems.asReversed().forEach { mediaItem ->
             audioPlayer.insertMediaItemAtNextIndex(mediaItem)
         }
 
@@ -393,12 +393,13 @@ class DeviceAudioPlayerQueue(
             return
         }
 
-        val mediaItems = state.entries.mapNotNull { it.toMediaItem() }
+        val pairs = state.entries.toMediaPairs()
+        val mediaItems = pairs.map { it.first }
         if (mediaItems.isEmpty()) {
             logger.w { "restorePersistedState: all entries had blank urls" }
             return
         }
-        entryByMediaUrl.value = mediaItems.associate { it.url to state.entries.firstOrNull { e -> e.toMediaItem()?.url == it.url }!! }
+        entryByMediaUrl.value = pairs.associate { (item, entry) -> item.url to entry }
         val normalizedStartPosition = state.currentIndex.coerceIn(0, mediaItems.lastIndex)
         logger.d { "Loading restored playlist with normalized start position: ${state.currentIndex} -> $normalizedStartPosition" }
         audioPlayer.load(mediaItems, autoPlay = false, startPosition = normalizedStartPosition)
@@ -411,7 +412,11 @@ class DeviceAudioPlayerQueue(
             return
         }
 
-        val queueEntries = getQueue()
+        // Cover art is large and would be serialized into the DataStore on every queue change.
+        // Trade-off: local tracks restored after a restart have no artwork until they are played again from the library.
+        val queueEntries = getQueue().map { entry ->
+            if (entry is QueueEntry.LocalTrack) entry.copy(coverBytes = null) else entry
+        }
         if (queueEntries.isEmpty()) {
             logger.d { "Persisting queue state: clearing state (queue is empty)" }
             repository.clearState()
@@ -452,6 +457,9 @@ class DeviceAudioPlayerQueue(
             updated
         }
     }
+
+    private suspend fun List<QueueEntry>.toMediaPairs(): List<Pair<MediaItem, QueueEntry>> =
+        mapNotNull { entry -> entry.toMediaItem()?.let { it to entry } }
 
     private suspend fun QueueEntry.toMediaItem(): MediaItem? {
         return when (this) {

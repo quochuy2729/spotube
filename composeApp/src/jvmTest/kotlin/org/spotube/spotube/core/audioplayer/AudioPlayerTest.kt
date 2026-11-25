@@ -243,6 +243,35 @@ class AudioPlayerTest {
             "Current item should be first in shuffled playlist")
     }
 
+    @Test
+    fun `auto-advance after shuffle follows shuffled order for local files`() = runBlocking {
+        withTimeout(30000.milliseconds) {
+            // Local files are added as plain paths, which VLC reports back as file:/// URIs.
+            val items = realAudioItems(4)
+            player.load(items, autoPlay = true, startPosition = 2)
+            awaitState(PlayerState.PLAYING)
+
+            player.shuffle(true)
+            val shuffled = player.playlistFlow.value
+            assertEquals(items[2].url, shuffled.first().url)
+
+            // Let the current track end naturally.
+            delay(500.milliseconds) // duration is filled in by position polling
+            val duration = player.durationFlow.value
+            if (duration.inWholeMilliseconds > 1000) {
+                player.seekTo(duration - 500.milliseconds)
+            }
+            val deadline = System.currentTimeMillis() + 10000
+            while (System.currentTimeMillis() < deadline &&
+                player.currentMediaItemFlow.value?.url == shuffled[0].url) {
+                delay(100.milliseconds)
+            }
+
+            assertEquals(shuffled[1].url, player.currentMediaItemFlow.value?.url,
+                "After shuffle, the next track must be the 2nd item of the shuffled queue")
+        }
+    }
+
     // --- Playlist management ---
 
     @Test

@@ -73,6 +73,18 @@
     <string name="library_local_empty_tracks">No tracks in this folder</string>
     <string name="library_local_no_results">No matching folders or tracks</string>
     <string name="library_local_refresh_failed">Failed to refresh local media</string>
+    <string name="library_local_delete_content_description">Delete track</string>
+    <string name="library_local_delete_title">Delete this track?</string>
+    <string name="library_local_delete_message">\"%1$s\" will be moved to the trash.</string>
+    <string name="library_local_delete_message_permanent">\"%1$s\" will be permanently deleted from your device. This cannot be undone.</string>
+    <string name="library_local_delete_confirm">Delete</string>
+    <string name="library_local_delete_cancel">Cancel</string>
+    <string name="library_local_play_order">Play order</string>
+    <string name="library_local_play_order_exit">Default order</string>
+    <string name="library_local_delete_failed">Could not delete \"%1$s\": %2$s</string>
+    <string name="library_local_virtual_favorites">Favorites</string>
+    <string name="library_local_virtual_recent">Recently played</string>
+    <string name="library_local_virtual_most_played">Most played</string>
 
     <!-- Downloads -->
     <string name="downloads_summary">%1$d active • %2$d completed</string>
@@ -166,6 +178,10 @@
     <string name="settings_palette_subtitle_current">Millennium accent palette. Current: %1$s</string>
     <string name="settings_palette_dialog_title">Palette</string>
     <string name="settings_palette_dialog_description">Choose a Millennium accent palette and preview it in light and dark.</string>
+    <string name="settings_pure_black_title">Pure black (AMOLED)</string>
+    <string name="settings_pure_black_subtitle">Use true black backgrounds in dark mode to save battery on OLED screens.</string>
+    <string name="settings_system_accent_title">Use system accent colour</string>
+    <string name="settings_system_accent_subtitle">Follow the accent colour of your device. Android 12 or newer only.</string>
     <string name="settings_palette_label">Palette</string>
     <string name="settings_appearance_subtitle_palette">Millennium palette and accent. Current: %1$s</string>
     <string name="settings_palette_blue">Blue</string>
@@ -774,6 +790,15 @@
     <string name="player_sleep_timer_minutes_placeholder">Choose between 1 and 600 minutes</string>
     <string name="player_sleep_timer_cancel">Cancel timer</string>
     <string name="player_sleep_timer_start">Start</string>
+    <string name="player_sleep_timer_quick_minutes">%1$d min</string>
+    <string name="player_sleep_timer_until_track_end">Until end of this track</string>
+    <string name="player_sleep_timer_track_end_active">Playback will pause when this track ends.</string>
+    <string name="player_sleep_timer_tile_remaining">Sleep timer · %1$s</string>
+    <string name="player_sleep_timer_tile_track_end">Sleep timer · end of track</string>
+    <string name="player_gesture_seek_back">-10s</string>
+    <string name="player_gesture_seek_forward">+10s</string>
+    <string name="player_speed">Playback speed</string>
+    <string name="player_speed_value">%1$sx</string>
     <string name="player_track_details_stream_mismatch">The playback URL was resolved with different streaming settings. The highlighted stream matches your current preference; the active URL refreshes on the next stream request.</string>
     <string name="player_track_details_matched_source">Matched audio source</string>
     <string name="player_track_details_loading_source">Loading matched source…</string>
@@ -975,4 +1000,13 @@
     <string name="media_browser_featured">Featured</string>
     <string name="media_browser_saved_tracks">Saved Tracks</string>
     <string name="media_browser_top_tracks">Top Tracks</string>
+    <string name="player_trim">Trim track</string>
+    <string name="player_trim_description">The cut parts are skipped during playback. The audio itself is not changed.</string>
+    <string name="player_trim_start">Starts at %1$s</string>
+    <string name="player_trim_end">Ends at %1$s (cuts the last %2$s)</string>
+    <string name="player_trim_step">%1$ss</string>
+    <string name="player_trim_use_position">Use current position (%1$s)</string>
+    <string name="player_trim_other_track">Another track is playing, so the current position is unavailable.</string>
+    <string name="player_trim_reset">Remove trim</string>
+    <string name="player_trim_save">Save</string>
 </resources>

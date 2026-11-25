@@ -33,6 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.ui.NavDisplay
+import coil3.ImageLoader
+import coil3.compose.setSingletonImageLoaderFactory
+import org.spotube.spotube.core.ui.image.ByteArrayKeyer
 import org.spotube.spotube.core.DebugConfig
 import org.spotube.spotube.core.i18n.AppLocaleProvider
 import org.spotube.spotube.core.navigation.Navigator
@@ -108,19 +111,6 @@ private val tabs = listOf<NavigationItem>(
 
 val sidebarTabs = tabs + listOf(
     NavigationItem.Group(
-        Res.string.library_toolbar_compact_title,
-        items = listOf(
-            NavigationItem.Tab(
-                Res.string.library_tab_playlists,
-                Iconsax.IconsaxMusicDashboard,
-                Routes.Library,
-                LibraryTab.Playlists
-            ),
-            NavigationItem.Tab(Res.string.library_tab_albums, Iconsax.IconsaxCd, Routes.Library, LibraryTab.Albums),
-            NavigationItem.Tab(Res.string.library_tab_artists, Iconsax.User, Routes.Library, LibraryTab.Artists)
-        )
-    ),
-    NavigationItem.Group(
         Res.string.nav_group_on_device,
         items = listOf(
             NavigationItem.Tab(
@@ -135,6 +125,19 @@ val sidebarTabs = tabs + listOf(
                 Routes.Library,
                 LibraryTab.Downloads
             )
+        )
+    ),
+    NavigationItem.Group(
+        Res.string.library_toolbar_compact_title,
+        items = listOf(
+            NavigationItem.Tab(
+                Res.string.library_tab_playlists,
+                Iconsax.IconsaxMusicDashboard,
+                Routes.Library,
+                LibraryTab.Playlists
+            ),
+            NavigationItem.Tab(Res.string.library_tab_albums, Iconsax.IconsaxCd, Routes.Library, LibraryTab.Albums),
+            NavigationItem.Tab(Res.string.library_tab_artists, Iconsax.User, Routes.Library, LibraryTab.Artists)
         )
     ),
     NavigationItem.Group(
@@ -155,6 +158,12 @@ val bottombarTabs = tabs + listOf(
 fun App(
     content: @Composable () -> Unit = {}
 ) {
+    // Components registered via ServiceLoader (e.g. the Ktor network fetcher) are still added by the builder.
+    setSingletonImageLoaderFactory { context ->
+        ImageLoader.Builder(context)
+            .components { add(ByteArrayKeyer) }
+            .build()
+    }
     val settingsRepository: SettingsRepository = koinInject<SettingsRepository>()
     val userSettings by settingsRepository.userSettings.collectAsStateWithLifecycle(initialValue = UserSettings())
     val appUpdateService: AppUpdateService = koinInject()

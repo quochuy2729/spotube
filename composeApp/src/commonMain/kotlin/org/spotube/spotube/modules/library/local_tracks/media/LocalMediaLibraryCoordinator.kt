@@ -35,12 +35,12 @@ import org.koin.core.component.KoinComponent
 class LocalMediaLibraryCoordinator(
     private val discoveryService: LocalMediaDiscoveryService,
     private val cacheRepository: LocalMediaCacheRepository,
-    private val foldersConfig: LocalMediaFoldersConfig) : KoinComponent {
+    private val foldersConfig: LocalMediaFoldersConfig) : LocalMediaLibrary, KoinComponent {
     private val logger by injectLogger<LocalMediaLibraryCoordinator>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _cacheState = MutableStateFlow(LocalMediaCache())
-    val cacheState: StateFlow<LocalMediaCache> = _cacheState.asStateFlow()
+    override val cacheState: StateFlow<LocalMediaCache> = _cacheState.asStateFlow()
 
     private var observation: LocalMediaObservation? = null
     private var periodicJob: Job? = null
@@ -83,7 +83,7 @@ class LocalMediaLibraryCoordinator(
         }
     }
 
-    suspend fun refreshIfStale() {
+    override suspend fun refreshIfStale() {
         val lastIndexedAt = _cacheState.value.indexedAtEpochMs
         val now = Clock.System.now().toEpochMilliseconds()
         if (now - lastIndexedAt >= STALE_AFTER_MS) {
@@ -91,7 +91,7 @@ class LocalMediaLibraryCoordinator(
         }
     }
 
-    suspend fun refreshNow(reason: String) {
+    override suspend fun refreshNow(reason: String) {
         refreshMutex.withLock {
             logger.i { "Refreshing local media cache. reason=$reason" }
             runCatching {

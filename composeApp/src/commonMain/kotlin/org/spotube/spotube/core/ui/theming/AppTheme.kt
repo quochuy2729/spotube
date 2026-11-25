@@ -42,6 +42,8 @@ import org.spotube.millennium.composables.MillenniumTopAppBarThemeProperties
 import org.spotube.millennium.composables.defaultMillenniumModalBottomSheetTheme
 import org.spotube.millennium.composables.defaultMillenniumTopAppBarTheme
 import org.spotube.millennium.theme.MillenniumColors
+import org.spotube.millennium.theme.MillenniumColorSchemes
+import org.spotube.millennium.theme.resolve
 import org.spotube.millennium.theme.MillenniumDarkThemeComponents
 import org.spotube.millennium.theme.MillenniumLightThemeComponents
 import org.spotube.millennium.theme.MillenniumPalette
@@ -207,6 +209,18 @@ fun SpotubeTheme(
         Theme.SYSTEM -> isSystemDarkTheme()
     }
     val palette: MillenniumPalette = settings.palette
+    val systemAccent = if (settings.useSystemAccent) systemAccentColor() else null
+    val colorSchemes = remember(palette, systemAccent, settings.pureBlack) {
+        val base = MillenniumColorSchemes()
+        if (systemAccent == null && !settings.pureBlack) {
+            base
+        } else {
+            // Every variant resolves to the same overridden pair, so any palette picks it up.
+            val light = applyColorOverrides(base.resolve(palette, dark = false), false, settings.pureBlack, systemAccent)
+            val dark = applyColorOverrides(base.resolve(palette, dark = true), true, settings.pureBlack, systemAccent)
+            MillenniumColorSchemes(light, dark, light, dark, light, dark)
+        }
+    }
 
     val darkTheme = MillenniumDarkThemeComponents
     val lightTheme = MillenniumLightThemeComponents
@@ -214,6 +228,7 @@ fun SpotubeTheme(
     MillenniumTheme(
         dark = isDarkTheme,
         config = MillenniumThemeConfig(
+            colorSchemes = colorSchemes,
             palette = palette,
             dark = darkTheme.copy(
                 topAppBarTheme = MillenniumTopAppBarTheme(

@@ -23,6 +23,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import androidx.annotation.OptIn
@@ -30,6 +31,7 @@ import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem as Media3MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -38,6 +40,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -47,10 +50,13 @@ import org.spotube.spotube.R
 import org.spotube.spotube.core.audioplayer.AudioPlayer
 import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
+import org.spotube.spotube.core.audioplayer.LoopState
 import org.spotube.spotube.core.audioplayer.QueueEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.core.component.KoinComponent
@@ -59,6 +65,11 @@ import org.jetbrains.compose.resources.getString
 import spotube.composeapp.generated.resources.Res
 import spotube.composeapp.generated.resources.notification_playback_channel_description
 import spotube.composeapp.generated.resources.notification_playback_channel_name
+import spotube.composeapp.generated.resources.player_disable_shuffle_content_description
+import spotube.composeapp.generated.resources.player_enable_shuffle_content_description
+import spotube.composeapp.generated.resources.player_loop_mode_all
+import spotube.composeapp.generated.resources.player_loop_mode_none
+import spotube.composeapp.generated.resources.player_loop_mode_one
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService(), KoinComponent {
@@ -71,6 +82,16 @@ class PlaybackService : MediaLibraryService(), KoinComponent {
     private lateinit var librarySession: MediaLibrarySession
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val shuffleCommand = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
+    private val repeatCommand = SessionCommand(ACTION_CYCLE_REPEAT, Bundle.EMPTY)
+
+    /** Latest shuffle/repeat buttons; empty until the labels have loaded. */
+    @Volatile private var mediaButtons: ImmutableList<CommandButton> = ImmutableList.of()
+
+    private class ButtonLabels(
+        val shuffleOn: String, val shuffleOff: String,
+        val repeatNone: String, val repeatOne: String, val repeatAll: String)
 
     override fun onCreate() {
         super.onCreate()
@@ -123,6 +144,7 @@ class PlaybackService : MediaLibraryService(), KoinComponent {
                 .build()
 
         addSession(librarySession)
+        observeMediaButtons()
 
         Log.i(TAG, "Library session created")
     }
@@ -156,11 +178,67 @@ class PlaybackService : MediaLibraryService(), KoinComponent {
         }
     }
 
+    /**
+     * Keeps the shuffle/repeat buttons of the notification and lock screen in sync with the player.
+     * Labels are loaded on the IO scope; the session must be updated on the main (player) thread.
+     */
+    private fun observeMediaButtons() {
+        // The player flows never complete, so this job must be cancelled in onDestroy or it keeps
+        // the destroyed service alive (and stacks up one collector per service re-creation).
+        mediaButtonsJob?.cancel()
+        mediaButtonsJob = serviceScope.launch {
+            val labels = ButtonLabels(
+                shuffleOn = getString(Res.string.player_disable_shuffle_content_description),
+                shuffleOff = getString(Res.string.player_enable_shuffle_content_description),
+                repeatNone = getString(Res.string.player_loop_mode_none),
+                repeatOne = getString(Res.string.player_loop_mode_one),
+                repeatAll = getString(Res.string.player_loop_mode_all))
+            combine(audioPlayer.shuffleModeFlow, audioPlayer.loopStateFlow) { shuffle, loop ->
+                buildMediaButtons(labels, shuffle, loop)
+            }.collect { buttons ->
+                mediaButtons = buttons
+                withContext(Dispatchers.Main) {
+                    if (!isSessionReleased) librarySession.setMediaButtonPreferences(buttons)
+                }
+            }
+        }
+    }
+
+    private var isSessionReleased = false
+    private var mediaButtonsJob: Job? = null
+
+    private fun buildMediaButtons(
+        labels: ButtonLabels, shuffle: Boolean, loop: LoopState): ImmutableList<CommandButton> {
+        val shuffleButton = CommandButton.Builder(
+            if (shuffle) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF)
+            .setSessionCommand(shuffleCommand)
+            .setDisplayName(if (shuffle) labels.shuffleOn else labels.shuffleOff)
+            .setEnabled(true)
+            .build()
+        val repeatButton = CommandButton.Builder(
+            when (loop) {
+                LoopState.NONE -> CommandButton.ICON_REPEAT_OFF
+                LoopState.ONE -> CommandButton.ICON_REPEAT_ONE
+                LoopState.ALL -> CommandButton.ICON_REPEAT_ALL
+            })
+            .setSessionCommand(repeatCommand)
+            .setDisplayName(when (loop) {
+                LoopState.NONE -> labels.repeatNone
+                LoopState.ONE -> labels.repeatOne
+                LoopState.ALL -> labels.repeatAll
+            })
+            .setEnabled(true)
+            .build()
+        return ImmutableList.of(shuffleButton, repeatButton)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession =
         librarySession
 
     override fun onDestroy() {
         Log.i(TAG, "onDestroy")
+        isSessionReleased = true
+        mediaButtonsJob?.cancel()
         removeSession(librarySession)
         librarySession.release()
         super.onDestroy()
@@ -188,16 +266,39 @@ class PlaybackService : MediaLibraryService(), KoinComponent {
                 .add(SessionCommand.COMMAND_CODE_LIBRARY_GET_LIBRARY_ROOT)
                 .add(SessionCommand.COMMAND_CODE_LIBRARY_SUBSCRIBE)
                 .add(SessionCommand.COMMAND_CODE_LIBRARY_UNSUBSCRIBE)
+                .add(shuffleCommand)
+                .add(repeatCommand)
                 .build()
 
             val playerCommands = Player.Commands.Builder()
                 .addAllCommands()
                 .build()
 
-            return MediaSession.ConnectionResult.accept(
-                sessionCommands,
-                playerCommands
-            )
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommands)
+                .setMediaButtonPreferences(mediaButtons)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                ACTION_TOGGLE_SHUFFLE -> serviceScope.launch {
+                    runCatching { audioPlayer.shuffle(!audioPlayer.shuffleModeFlow.value) }
+                        .onFailure { Log.w(TAG, "Toggling shuffle failed", it) }
+                }
+                ACTION_CYCLE_REPEAT -> serviceScope.launch {
+                    runCatching { audioPlayer.loop(audioPlayer.loopStateFlow.value.next()) }
+                        .onFailure { Log.w(TAG, "Cycling repeat failed", it) }
+                }
+                else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         override fun onGetLibraryRoot(
@@ -454,5 +555,7 @@ class PlaybackService : MediaLibraryService(), KoinComponent {
         private const val TAG = "PlaybackService"
         private const val CHANNEL_ID = "spotube_playback"
         private const val NOTIFICATION_ID = 1
+        private const val ACTION_TOGGLE_SHUFFLE = "org.spotube.spotube.action.TOGGLE_SHUFFLE"
+        private const val ACTION_CYCLE_REPEAT = "org.spotube.spotube.action.CYCLE_REPEAT"
     }
 }

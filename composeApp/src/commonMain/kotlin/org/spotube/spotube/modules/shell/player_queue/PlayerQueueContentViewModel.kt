@@ -17,6 +17,7 @@
 
 package org.spotube.spotube.modules.shell.player_queue
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@Immutable
 data class QueueItemUi(
     val id: String,
     val title: String,
@@ -73,6 +75,7 @@ class PlayerQueueContentViewModel(
         } else {
             -1
         }
+        val urlOccurrences = HashMap<String, Int>()
         queue.mapIndexed { index, entry ->
             val title: String
             val subtitle: String
@@ -95,7 +98,8 @@ class PlayerQueueContentViewModel(
             val addedByParticipant = participants.firstOrNull { it.id == entry.addedBy }
 
             QueueItemUi(
-                id = "${entry.url}@$index",
+                // Map.merge is JVM-only; this file is common code (iOS too).
+                id = queueItemKey(entry.url, (urlOccurrences[entry.url] ?: 0).also { urlOccurrences[entry.url] = it + 1 }),
                 title = title,
                 subtitle = subtitle,
                 durationLabel = durationMs.toDurationLabel(),
@@ -235,6 +239,9 @@ class PlayerQueueContentViewModel(
         reorderBuffer.value = null
     }
 }
+
+/** Stable across removals: only the n-th duplicate of the same url shifts, not every later item. */
+internal fun queueItemKey(url: String, occurrence: Int): String = "$url#$occurrence"
 
 private fun QueueEntry.matchesCurrent(current: QueueEntry): Boolean {
     return when {

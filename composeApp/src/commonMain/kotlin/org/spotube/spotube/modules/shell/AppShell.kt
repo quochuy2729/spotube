@@ -79,6 +79,7 @@ import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.spotube.millennium.composables.MillenniumSeparator
 import org.spotube.millennium.composables.MillenniumSnackbarHost
+import org.spotube.spotube.core.ui.AppMessages
 import org.spotube.millennium.composables.MillenniumSnackbarHostState
 import org.spotube.millennium.theme.MillenniumTheme
 
@@ -96,6 +97,10 @@ fun AppShell(
     val navigatorCommands: NavigationCommands = koinInject()
     val remotePlaybackController: RemotePlaybackController = koinInject()
     val snackbarHostState = remember { MillenniumSnackbarHostState() }
+    val appMessages: AppMessages = koinInject()
+    LaunchedEffect(appMessages) {
+        appMessages.messages.collect { message -> snackbarHostState.showSnackbar(message) }
+    }
     LaunchedEffect(remotePlaybackController) {
         remotePlaybackController.events.collect { message ->
             snackbarHostState.showSnackbar(message)

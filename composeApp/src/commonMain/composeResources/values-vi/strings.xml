@@ -917,4 +917,13 @@
     <string name="media_browser_featured">Nổi bật</string>
     <string name="media_browser_saved_tracks">Bài hát đã lưu</string>
     <string name="media_browser_top_tracks">Bài hát hàng đầu</string>
+    <string name="player_trim">Cắt đoạn nhạc</string>
+    <string name="player_trim_description">Đoạn bị cắt sẽ được bỏ qua khi phát. File nhạc gốc không bị thay đổi.</string>
+    <string name="player_trim_start">Bắt đầu từ %1$s</string>
+    <string name="player_trim_end">Kết thúc tại %1$s (bỏ %2$s cuối)</string>
+    <string name="player_trim_step">%1$s giây</string>
+    <string name="player_trim_use_position">Lấy vị trí đang phát (%1$s)</string>
+    <string name="player_trim_other_track">Đang phát bài khác nên không lấy được vị trí.</string>
+    <string name="player_trim_reset">Bỏ cắt</string>
+    <string name="player_trim_save">Lưu</string>
 </resources>

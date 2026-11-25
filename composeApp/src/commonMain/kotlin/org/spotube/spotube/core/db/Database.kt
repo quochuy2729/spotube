@@ -71,6 +71,20 @@ class Database(val paths: Paths) {
         )
     }
 
+    /** Per-track user data for local music (favourites, play counts), keyed by track path. */
+    val localUserDataStore: DataStore<Preferences> by lazy {
+        PreferenceDataStoreFactory.createWithPath(
+            produceFile = { "${paths.getApplicationDataDirPath()}/spotube_local_user.preferences_pb".toPath() }
+        )
+    }
+
+    /** Per-track playback trims (cut intro / outro). */
+    val trackTrimDataStore: DataStore<Preferences> by lazy {
+        PreferenceDataStoreFactory.createWithPath(
+            produceFile = { "${paths.getApplicationDataDirPath()}/spotube_track_trims.preferences_pb".toPath() }
+        )
+    }
+
     val blacklistDataStore: DataStore<Preferences> by lazy {
         PreferenceDataStoreFactory.createWithPath(
             produceFile = { "${paths.getApplicationDataDirPath()}/spotube_blacklist.preferences_pb".toPath() }

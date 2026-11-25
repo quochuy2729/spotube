@@ -26,6 +26,8 @@ import org.spotube.spotube.core.share.ShareService
 import org.spotube.spotube.core.systemtray.SystemTrayService
 import org.spotube.spotube.modules.library.local_tracks.media.JvmLocalMediaDiscoveryService
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaDiscoveryService
+import org.spotube.spotube.modules.library.local_tracks.media.JvmLocalTrackDeleter
+import org.spotube.spotube.modules.library.local_tracks.media.LocalTrackDeleter
 import org.koin.core.module.dsl.createdAtStart
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.withOptions
@@ -38,6 +40,7 @@ actual val platformModules = module {
     single { WindowStateRepository(get<Database>()) }
     single<AudioPlayerInterface> { AudioPlayer(Unit) }
     single<LocalMediaDiscoveryService> { JvmLocalMediaDiscoveryService() }
+    single<LocalTrackDeleter> { JvmLocalTrackDeleter() }
     single<ShareService> { JvmShareService() }
     single { SystemTrayService(get(), get(), get()) }
     single { SystemMediaControlService(get()) } withOptions { createdAtStart() }

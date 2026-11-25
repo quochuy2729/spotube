@@ -58,6 +58,9 @@ class LibraryToolbarTest {
 
     @Test
     fun closingSearchClearsTheActiveFilter() = runTest {
+        // The default tab is LocalTracks; this test exercises the Playlists filter explicitly.
+        library.onTabSelected(LibraryTab.Playlists)
+        runCurrent()
         library.openSearch()
         library.uiState.value.searchState.setTextAndPlaceCursorAtEnd("Muse")
         Snapshot.sendApplyNotifications()
@@ -114,6 +117,9 @@ class LibraryToolbarTest {
     fun viewModeDefaultsAndOverridesArePerTab() = runTest {
         assertEquals(LibraryViewMode.List, defaultLibraryViewMode(true))
         assertEquals(LibraryViewMode.Grid, defaultLibraryViewMode(false))
+        // The default tab is LocalTracks (no view toggle), so start from Playlists explicitly.
+        library.onTabSelected(LibraryTab.Playlists)
+        runCurrent()
         library.toggleViewMode(isCompact = true)
         runCurrent()
         assertEquals(LibraryViewMode.Grid, library.uiState.value.viewModeOverride)

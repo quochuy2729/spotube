@@ -26,7 +26,14 @@ data class LocalMediaTrack(
     val artists: List<String>,
     val durationMs: Long,
     val album: String? = null,
-    val coverBytes: ByteArray? = null)
+    val coverBytes: ByteArray? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null)
+
+/** Tracks without a track number last; otherwise disc (missing = 1), then track number, then name. */
+val LocalMediaTrackComparator: Comparator<LocalMediaTrack> =
+    compareBy<LocalMediaTrack>({ it.trackNumber == null }, { it.discNumber ?: 1 }, { it.trackNumber ?: 0 })
+        .thenBy { it.name.lowercase() }
 
 @Serializable
 data class LocalMediaFolder(
@@ -35,7 +42,17 @@ data class LocalMediaFolder(
     val tracks: List<LocalMediaTrack>) {
     val trackCount: Int
         get() = tracks.size
+
+    /** Virtual collections (favorites...) are built on the fly: never scanned, never deleted. */
+    val isVirtual: Boolean
+        get() = path.startsWith(VIRTUAL_FOLDER_PREFIX)
 }
+
+const val VIRTUAL_FOLDER_PREFIX = "spotube-virtual:"
+const val FAVORITES_FOLDER_PATH = "${VIRTUAL_FOLDER_PREFIX}favorites"
+const val RECENT_FOLDER_PATH = "${VIRTUAL_FOLDER_PREFIX}recent"
+const val MOST_PLAYED_FOLDER_PATH = "${VIRTUAL_FOLDER_PREFIX}most_played"
+
 
 @Serializable
 data class LocalMediaCache(

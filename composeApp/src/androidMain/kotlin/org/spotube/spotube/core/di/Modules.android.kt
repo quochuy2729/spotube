@@ -25,13 +25,18 @@ import org.spotube.spotube.core.share.AndroidShareService
 import org.spotube.spotube.core.share.ShareService
 import org.spotube.spotube.media.MediaBrowseHelper
 import org.spotube.spotube.modules.library.local_tracks.media.AndroidLocalMediaDiscoveryService
+import org.spotube.spotube.modules.library.local_tracks.media.AndroidDeleteRequestLauncher
+import org.spotube.spotube.modules.library.local_tracks.media.AndroidLocalTrackDeleter
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaDiscoveryService
+import org.spotube.spotube.modules.library.local_tracks.media.LocalTrackDeleter
 import org.koin.dsl.module
 
 actual val platformModules = module {
     single { Paths() }
     single<AudioPlayerInterface> { AudioPlayer(get<Context>()) }
     single<LocalMediaDiscoveryService> { AndroidLocalMediaDiscoveryService(get()) }
+    single { AndroidDeleteRequestLauncher() }
+    single<LocalTrackDeleter> { AndroidLocalTrackDeleter(get<Context>(), get()) }
     single<ShareService> { AndroidShareService(get()) }
     single {
         MediaBrowseHelper(

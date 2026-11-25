@@ -25,6 +25,7 @@ import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.QueueEntry
+import org.spotube.spotube.core.audioplayer.SleepTimerController
 import org.spotube.spotube.core.server.CacheEntry
 import org.spotube.spotube.core.server.CacheManager
 import org.spotube.spotube.core.server.StreamingUrlRepository
@@ -37,14 +38,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.milliseconds
 import org.jetbrains.compose.resources.StringResource
 import spotube.composeapp.generated.resources.Res
 import spotube.composeapp.generated.resources.player_track_details_load_failed
@@ -74,6 +76,9 @@ data class PlayerOptionsUiState(
     val isSleepTimerDialogOpen: Boolean = false,
     val sleepTimerMinutes: String = "30",
     val sleepTimerRemainingMs: Long? = null,
+    val sleepTimerUntilTrackEnd: Boolean = false,
+    val isSpeedDialogOpen: Boolean = false,
+    val playbackSpeed: Float = 1f,
     val trackDetails: PlayerTrackDetails? = null)
 
 class PlayerOptionsViewModel(
@@ -83,11 +88,22 @@ class PlayerOptionsViewModel(
     private val streamingUrlRepository: StreamingUrlRepository,
     private val cacheManager: CacheManager,
     private val settingsRepository: SettingsRepository,
-    private val pluginManager: AudioPluginSource) : ViewModel() {
+    private val pluginManager: AudioPluginSource,
+    private val sleepTimerController: SleepTimerController) : ViewModel() {
     private val _uiState = MutableStateFlow(PlayerOptionsUiState())
-    val uiState: StateFlow<PlayerOptionsUiState> = _uiState.asStateFlow()
+    val uiState: StateFlow<PlayerOptionsUiState> = combine(
+        _uiState,
+        sleepTimerController.state,
+        audioPlayer.playbackSpeedFlow) { state, timer, speed ->
+        state.copy(
+            sleepTimerRemainingMs = timer.remainingMs,
+            sleepTimerUntilTrackEnd = timer.untilTrackEnd,
+            playbackSpeed = speed)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = PlayerOptionsUiState())
 
-    private var sleepTimerJob: Job? = null
     private var trackDetailsJob: Job? = null
 
     fun showMoreOptionsMenu() {
@@ -125,28 +141,36 @@ class PlayerOptionsViewModel(
     }
 
     fun startSleepTimer() {
-        val minutes = _uiState.value.sleepTimerMinutes.toLongOrNull()
-            ?.takeIf { it in 1..600 } ?: return
-        val durationMs = minutes * MILLIS_PER_MINUTE
+        val minutes = _uiState.value.sleepTimerMinutes.toLongOrNull() ?: return
+        startSleepTimerMinutes(minutes)
+    }
 
-        sleepTimerJob?.cancel()
-        sleepTimerJob = viewModelScope.launch {
-            var remainingMs = durationMs
-            while (remainingMs > 0L) {
-                _uiState.update { it.copy(sleepTimerRemainingMs = remainingMs) }
-                val tickMs = minOf(remainingMs, MILLIS_PER_SECOND)
-                delay(tickMs.milliseconds)
-                remainingMs -= tickMs
-            }
-            runCatching { audioPlayer.pause() }
-            _uiState.update { it.copy(sleepTimerRemainingMs = null, isSleepTimerDialogOpen = false) }
-        }
+    fun startSleepTimerMinutes(minutes: Long) {
+        if (minutes !in 1..SleepTimerController.MAX_MINUTES) return
+        sleepTimerController.startCountdown(minutes)
+        _uiState.update { it.copy(isSleepTimerDialogOpen = false) }
+    }
+
+    fun startSleepTimerUntilTrackEnd() {
+        sleepTimerController.startUntilTrackEnd()
+        _uiState.update { it.copy(isSleepTimerDialogOpen = false) }
     }
 
     fun cancelSleepTimer() {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
-        _uiState.update { it.copy(sleepTimerRemainingMs = null) }
+        sleepTimerController.cancel()
+    }
+
+    fun showSpeedDialog() {
+        _uiState.update { it.copy(isSpeedDialogOpen = true) }
+    }
+
+    fun dismissSpeedDialog() {
+        _uiState.update { it.copy(isSpeedDialogOpen = false) }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        viewModelScope.launch { runCatching { audioPlayer.setPlaybackSpeed(speed) } }
+        _uiState.update { it.copy(isSpeedDialogOpen = false) }
     }
 
     fun showTrackDetails() {
@@ -232,13 +256,12 @@ class PlayerOptionsViewModel(
     }
 
     override fun onCleared() {
-        sleepTimerJob?.cancel()
         trackDetailsJob?.cancel()
         super.onCleared()
     }
 
     companion object {
-        private const val MILLIS_PER_SECOND = 1_000L
-        private const val MILLIS_PER_MINUTE = 60_000L
+        val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+        val SLEEP_TIMER_QUICK_MINUTES = listOf(15L, 30L, 45L, 60L)
     }
 }

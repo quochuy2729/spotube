@@ -43,6 +43,10 @@ data class UserSettings(
     // Appearance
     val theme: Theme = Theme.SYSTEM,
     val palette: MillenniumPalette = MillenniumPalette.Blue,
+    /** AMOLED: true black backgrounds in dark mode. */
+    val pureBlack: Boolean = false,
+    /** Use the OS accent colour (Android 12+) instead of the palette accent. */
+    val useSystemAccent: Boolean = false,
 
     // Playback
     val streamingMusicFormat: AudioFormat = defaultStreamingMusicFormat(),

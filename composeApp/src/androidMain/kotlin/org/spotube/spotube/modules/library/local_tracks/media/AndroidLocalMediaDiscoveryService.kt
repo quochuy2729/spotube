@@ -51,7 +51,9 @@ class AndroidLocalMediaDiscoveryService(
         val artists: List<String>,
         val album: String?,
         val durationMs: Long,
-        val cover: ByteArray?)
+        val cover: ByteArray?,
+        val trackNumber: Int?,
+        val discNumber: Int?)
 
     private class PendingTrack(
         val uri: String,
@@ -306,7 +308,9 @@ class AndroidLocalMediaDiscoveryService(
                         artists = tag?.artists?.takeIf { it.isNotEmpty() } ?: item.mediaStoreArtists,
                         durationMs = tag?.durationMs?.takeIf { it > 0 } ?: item.mediaStoreDurationMs,
                         album = tag?.album?.takeIf { it.isNotBlank() } ?: item.mediaStoreAlbum,
-                        coverBytes = tag?.cover)
+                        coverBytes = tag?.cover,
+                        trackNumber = tag?.trackNumber,
+                        discNumber = tag?.discNumber)
                 }
             }.awaitAll()
         }
@@ -315,7 +319,7 @@ class AndroidLocalMediaDiscoveryService(
                 LocalMediaFolder(
                     path = path,
                     name = normalizeFolderName(path),
-                    tracks = list.sortedBy { it.name.lowercase(Locale.getDefault()) })
+                    tracks = list.sortedWith(LocalMediaTrackComparator))
             }
             .sortedBy { it.name.lowercase(Locale.getDefault()) }
     }
@@ -333,7 +337,9 @@ class AndroidLocalMediaDiscoveryService(
                 artists = meta.artists,
                 album = meta.album,
                 durationMs = meta.durationMs,
-                cover = meta.coverBytes?.let(::thumbnail))
+                cover = meta.coverBytes?.let(::thumbnail),
+                trackNumber = meta.trackNumber?.toInt(),
+                discNumber = meta.discNumber?.toInt())
         } catch (t: Throwable) {
             logger.d { "readTags: failed path=$path reason=${t.message}" }
             null

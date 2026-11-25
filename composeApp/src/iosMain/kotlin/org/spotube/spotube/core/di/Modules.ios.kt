@@ -25,6 +25,8 @@ import org.spotube.spotube.core.share.ShareService
 import org.spotube.spotube.core.webview.WebViewController
 import org.spotube.spotube.modules.library.local_tracks.media.IosLocalMediaDiscoveryService
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaDiscoveryService
+import org.spotube.spotube.modules.library.local_tracks.media.LocalTrackDeleter
+import org.spotube.spotube.modules.library.local_tracks.media.UnsupportedLocalTrackDeleter
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.module
 
@@ -33,5 +35,6 @@ actual val platformModules = module {
     singleOf(::WebViewController)
     single<AudioPlayerInterface> { AudioPlayer(Unit) }
     single<LocalMediaDiscoveryService> { IosLocalMediaDiscoveryService() }
+    single<LocalTrackDeleter> { UnsupportedLocalTrackDeleter() }
     single<ShareService> { IosShareService() }
 }

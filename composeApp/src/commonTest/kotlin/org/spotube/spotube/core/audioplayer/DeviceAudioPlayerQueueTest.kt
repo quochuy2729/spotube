@@ -236,6 +236,18 @@ class DeviceAudioPlayerQueueTest {
         assertEquals(1, fakePlayer.insertAtNextCallCount)
     }
 
+    @Test
+    fun `addAllAfterCurrent keeps original order after current track`() = runTest {
+        val queue = createQueue()
+        queue.load(listOf(streamingEntry("c"), streamingEntry("z")))
+
+        queue.addAllAfterCurrent(listOf(streamingEntry("a"), streamingEntry("b"), streamingEntry("d")))
+
+        assertEquals(
+            listOf("Track c", "Track a", "Track b", "Track d", "Track z"),
+            fakePlayer.playlistFlow.value.map { it.title })
+    }
+
     // --- removeFromQueue ---
 
     @Test
